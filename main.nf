@@ -8,10 +8,6 @@ workflow SAMPLESHEET_SPLIT {
     Channel
         .fromPath(samplesheet)
         .splitCsv(header: true, sep: ',', quote: '"')
-        .filter { row -> 
-            row.File_Size?.isNumber() && row.File_Size.toLong() < 50 * 1024 * 1024
-        }
-        .randomSample(5)
         .map { row -> 
             [
                 entityid: row['entityId']?.trim(),
@@ -63,7 +59,6 @@ process cds_upload {
     tuple val(meta), path(entity)
     secret 'AWS_ACCESS_KEY_ID'
     secret 'AWS_SECRET_ACCESS_KEY'    
-    secret 'AWS_SESSION_TOKEN'
 
     output:
     tuple val(meta), path(entity)
