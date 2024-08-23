@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/./master/nextflow_schema.json",
-  "title": ". pipeline parameters",
-  "description": "",
+  "$id": "https://raw.githubusercontent.com/ncihtan/nf-cdstransfer/main/nextflow_schema.json",
+  "title": "nf-cdstransfer",
+  "description": "Workflow to transfer data from Synapse to CDS",
   "type": "object",
   "$defs": {
     "input_output_options": {
