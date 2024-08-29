@@ -57,6 +57,8 @@ The `CDS_UPLOAD` process uploads the files downloaded from Synapse to an AWS S3 
 #### Dependencies
 - Requires AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `AWS_SESSION_TOKEN`).
 
+  Set these as `nextflow secrets set AWS_ACCESS_KEY_ID <your_access_key_id>`
+
 ## Running the Workflow
 
 ### Prerequisites
