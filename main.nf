@@ -35,10 +35,7 @@ workflow SAMPLESHEET_SPLIT {
 
 process synapse_get {
 
-    conda "bioconda::synapseclient=2.6.0"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/synapseclient:2.6.0--pyh5e36f6f_0' :
-        'quay.io/biocontainers/synapseclient:2.6.0--pyh5e36f6f_0' }"
+    container "ghcr.io/ncihtan/nf-imagecleaner"
 
     tag "${meta.entityid}"
 
@@ -65,8 +62,7 @@ process synapse_get {
 }
 
 process cds_upload {
-    conda "bioconda::awscli=1.18.69"
-    container "local-aws-cli-v2"
+    container "ghcr.io/ncihtan/nf-imagecleaner"
 
     tag "${meta.entityid}"
 
