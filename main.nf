@@ -1,16 +1,5 @@
-params.input = 'samplesheet.csv'
-params.dryrun = false
-
-// include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
-
-// Validate input parameters
-// validateParameters()
-
-// Print summary of supplied parameters
-// log.info paramsSummaryLog(workflow)
-
-// Create a new channel of metadata from a sample sheet passed to the pipeline through the --input parameter
-// ch_input = Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+params.input = params.input ?: 'samplesheet.csv'
+params.dryrun = params.dryrun ?: false
 
 ch_input = Channel.fromPath(params.input).splitCsv(sep: ',', skip: 1)
 ch_input.view()
@@ -70,7 +59,6 @@ process cds_upload {
     tuple val(meta), path(entity)
     secret 'AWS_ACCESS_KEY_ID'
     secret 'AWS_SECRET_ACCESS_KEY'
-    //secret 'AWS_SESSION_TOKEN'
 
     output:
     tuple val(meta), path(entity)
@@ -80,38 +68,15 @@ process cds_upload {
     set -e
     unset AWS_PROFILE  # Ensure no profile is interfering
 
-    # Check AWS CLI installation and version for debugging
-    aws --version
-    echo "Attempting to list S3 buckets to check credentials"
-    aws s3 ls
-
     # Run the AWS S3 copy command with environment variables
     aws s3 cp $entity $meta.aws_uri ${params.dryrun ? '--dryrun' : ''}
     """
 }
 
-workflow SYNAPSE_GET {
-    take:
-    entities
-    main:
-    files = synapse_get(entities)
-    emit:
-    files
-}
-
-workflow CDS_UPLOAD {
-    take:
-    files
-    main:
-    cds_upload(files)
-    emit:
-    files
-}
-
 workflow {
     samplesheet = file(params.input)
-    entities = SAMPLESHEET_SPLIT(samplesheet)
-    entities.view()
-    files = SYNAPSE_GET(entities)
-    CDS_UPLOAD(files)
+
+    SAMPLESHEET_SPLIT(samplesheet) \
+        | synapse_get \
+        | cds_upload
 }
