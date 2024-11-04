@@ -2,22 +2,22 @@
 FROM python:3.11-slim
 
 ENV PIP_DEFAULT_TIMEOUT=100 \
-    # Allow statements and log messages to immediately appear
     PYTHONUNBUFFERED=1 \
-    # disable a pip version check to reduce run-time & log-spam
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    # cache is useless in docker image, so disable to reduce image size
     PIP_NO_CACHE_DIR=1
 
-# Install CA certificates and other dependencies
+# Install CA certificates, gcc, python3-dev, and other dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     curl \
     unzip \
     procps \
-    ca-certificates && \
+    ca-certificates \
+    gcc \
+    python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip and install synapseclient
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install synapseclient==4.6.0
 
@@ -30,3 +30,4 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
 # Set the working directory
 WORKDIR /workspace
 
+ENTRYPOINT ["/bin/bash"]
