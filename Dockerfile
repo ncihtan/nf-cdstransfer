@@ -29,5 +29,3 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
 
 # Set the working directory
 WORKDIR /workspace
-
-ENTRYPOINT ["/bin/bash"]
