@@ -1,9 +1,35 @@
+#!/usr/bin/env nextflow
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ncihtan/mf-cdstransfer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Github : https://github.com/nncihtan/nf-cdstransfer
+----------------------------------------------------------------------------------------
+*/
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    PARAMATERS AND INPUTS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 params.input = params.input ?: 'samplesheet.csv'
 params.dryrun = params.dryrun ?: false
 params.output_report = params.output_report ?: 'output_report.csv'
 
 ch_input = Channel.fromPath(params.input).splitCsv(sep: ',', skip: 1)
-ch_input.view()
+
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    SAMPLESHEET SPLIT
+    This workflow takes the samplesheet and splits it into individual entities.
+    It takes a samplesheet with two columns: entityid and aws_uri.
+    It passes a tuple of entityid and aws_uri to the next process.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
 
 workflow SAMPLESHEET_SPLIT {
     take:
@@ -27,6 +53,18 @@ workflow SAMPLESHEET_SPLIT {
     emit: 
     entities
 }
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    synapse_get
+    This process downloads the entity from Synapse using the entityid.
+    Spaces in filenames are replaced with underscores.
+    It takes a tuple of entityid and aws_uri.
+    It passes a tuple of the metamap and the file to the next process.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
 
 process synapse_get {
 
@@ -149,6 +187,17 @@ workflow {
     """
 }
 
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    cds_upload
+    This process uploads the file to the CDS using the aws_uri.
+    It takes a tuple of the metamap and the file.
+    It passes a tuple of the metamap and the file to the next process.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process cds_upload {
     container "quay.io/brunograndephd/aws-cli:latest"
 
@@ -169,6 +218,17 @@ process cds_upload {
     aws s3 cp $entity $meta.aws_uri ${params.dryrun ? '--dryrun' : ''}
     """
 }
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    MAIN WORKFLOW
+
+    This workflow takes the samplesheet and splits it into individual entities.
+    It downloads the entity from Synapse using the entityid.
+    It uploads the file to the CDS using the aws_uri.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
 
 workflow {
     samplesheet = file(params.input)
