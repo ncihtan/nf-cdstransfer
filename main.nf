@@ -1,17 +1,18 @@
 params.input = 'samplesheet.csv'
 params.dryrun = false
 
-include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
+// include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
 // Validate input parameters
-validateParameters()
+// validateParameters()
 
 // Print summary of supplied parameters
-log.info paramsSummaryLog(workflow)
+// log.info paramsSummaryLog(workflow)
 
 // Create a new channel of metadata from a sample sheet passed to the pipeline through the --input parameter
-ch_input = Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+// ch_input = Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
 
+ch_input = Channel.fromPath(params.input).splitCsv(sep: ',', skip: 1)
 ch_input.view()
 
 workflow SAMPLESHEET_SPLIT {
@@ -65,9 +66,7 @@ process synapse_get {
 
 process cds_upload {
     conda "bioconda::awscli=1.18.69"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/awscli:1.18.69--pyh9f0ad1d_0' :
-        'quay.io/biocontainers/awscli:1.18.69--pyh9f0ad1d_0' }"
+    container "local-aws-cli-v2"
 
     tag "${meta.entityid}"
 
@@ -75,16 +74,23 @@ process cds_upload {
     tuple val(meta), path(entity)
     secret 'AWS_ACCESS_KEY_ID'
     secret 'AWS_SECRET_ACCESS_KEY'
-    secret 'AWS_SESSION_TOKEN'
+    //secret 'AWS_SESSION_TOKEN'
 
     output:
     tuple val(meta), path(entity)
 
     script:
     """
-    aws s3 cp \\
-        $entity $meta.aws_uri \\
-        ${params.dryrun ? '--dryrun' : ''}
+    set -e
+    unset AWS_PROFILE  # Ensure no profile is interfering
+
+    # Check AWS CLI installation and version for debugging
+    aws --version
+    echo "Attempting to list S3 buckets to check credentials"
+    aws s3 ls
+
+    # Run the AWS S3 copy command with environment variables
+    aws s3 cp $entity $meta.aws_uri ${params.dryrun ? '--dryrun' : ''}
     """
 }
 
