@@ -235,5 +235,6 @@ workflow {
 
     SAMPLESHEET_SPLIT(samplesheet) \
         | synapse_get \
-        | cds_upload
+        | cds_upload \
+        | generate_report
 }
