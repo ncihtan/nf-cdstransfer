@@ -17,6 +17,12 @@ RUN apt-get update && \
     python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
+# Add support for multiple architectures (specifically for ARM64)
+RUN dpkg --add-architecture amd64 && \
+    apt-get update && \
+    apt-get install -y libc6:amd64 && \
+    rm -rf /var/lib/apt/lists/*
+
 # Upgrade pip and install synapseclient
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install synapseclient==4.6.0
