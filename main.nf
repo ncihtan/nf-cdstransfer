@@ -24,7 +24,7 @@ workflow SAMPLESHEET_SPLIT {
 
 process synapse_get {
 
-    container "ghcr.io/ncihtan/nf-imagecleaner"
+    container "quay.io/sagebionetworks/synapsepythonclient:v2.5.1"
 
     tag "${meta.entityid}"
 
@@ -51,24 +51,22 @@ process synapse_get {
 }
 
 process cds_upload {
-    container "ghcr.io/ncihtan/nf-imagecleaner"
+    container "quay.io/brunograndephd/aws-cli:latest"
 
     tag "${meta.entityid}"
 
     input:
     tuple val(meta), path(entity)
-    secret 'AWS_ACCESS_KEY_ID'
-    secret 'AWS_SECRET_ACCESS_KEY'
+    secret 'CDS_AWS_ACCESS_KEY_ID'
+    secret 'CDS_AWS_SECRET_ACCESS_KEY'
 
     output:
     tuple val(meta), path(entity)
 
     script:
     """
-    set -e
-    unset AWS_PROFILE  # Ensure no profile is interfering
-
-    # Run the AWS S3 copy command with environment variables
+    AWS_ACCESS_KEY_ID=\$CDS_AWS_ACCESS_KEY_ID \
+    AWS_SECRET_ACCESS_KEY=\$CDS_AWS_SECRET_ACCESS_KEY \
     aws s3 cp $entity $meta.aws_uri ${params.dryrun ? '--dryrun' : ''}
     """
 }
