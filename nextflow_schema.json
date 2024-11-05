@@ -28,6 +28,13 @@
           "description": "Run the pipeline in dry-run mode",
           "help_text": "If this parameter is set to true, the pipeline will not transfer any data, but will print out the commands that would be executed. This is useful for testing the pipeline before running it for real.",
           "fa_icon": "fas fa-flask"
+        },
+        "take_n": {
+          "type": "integer",
+          "default": -1,
+          "description": "Only take the first N rows of the input file",
+          "help_text": "Use this parameter to limit the number of rows read from the input file. This is useful for testing the pipeline on a subset of the data before running it for real.",
+          "fa_icon": "fas fa-filter"
         }
       }
     }
