@@ -121,7 +121,7 @@ process cds_upload {
 
 workflow {
     ch_input \
-        | take ( params.take_n ?: -1 ) \// Optionally limit the number of entities to process
+        | take ( params.take_n ?: -1 ) \
         | synapse_get \
         | cds_upload
 }
