@@ -80,7 +80,7 @@ process synapse_get {
     secret 'SYNAPSE_AUTH_TOKEN'
 
     output:
-    tuple val(meta), path("${meta.entityid}_output/*")
+    tuple val(meta), path("*")
 
     script:
     def args = task.ext.args ?: ''
