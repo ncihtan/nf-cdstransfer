@@ -32,7 +32,7 @@
         "take_n": {
           "type": "integer",
           "default": -1,
-          "description": "Only take the first N rows of the input file",
+          "description": "Only take the first N rows of the input file. Set to -1 to read all rows.",
           "help_text": "Use this parameter to limit the number of rows read from the input file. This is useful for testing the pipeline on a subset of the data before running it for real.",
           "fa_icon": "fas fa-filter"
         }
