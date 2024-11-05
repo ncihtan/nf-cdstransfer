@@ -79,6 +79,12 @@ nextflow run main.nf --input path/to/samplesheet.csv
 nextflow run main.nf --input samplesheet.csv
 ```
 
+Using the test profile will use a built in samplesheet. Note that this requires your provided AWS credentials have acccess to the Sage test bucket `s3://htan-cds-transfer-test-bucket`
+
+```bash
+nextflow run main.nf -profile test
+```
+
 ### Outputs
 - The final output will be the files successfully uploaded to the specified AWS S3 bucket.
 
@@ -87,14 +93,5 @@ nextflow run main.nf --input samplesheet.csv
 The following environment variables should be set with your credentials:
 
 - `SYNAPSE_AUTH_TOKEN`: Synapse authentication token.
-- `AWS_ACCESS_KEY_ID`: AWS access key ID.
-- `AWS_SECRET_ACCESS_KEY`: AWS secret access key.
-- `AWS_SESSION_TOKEN` (optional): AWS session token for temporary credentials.
-
-## License
-
-This workflow is provided as-is without any warranties. Modify and use it at your own risk.
-
----
-
-This documentation should provide you with a clear understanding of how the workflow operates, the inputs it requires, and how to run it effectively.
+- `CDS_AWS_ACCESS_KEY_ID`: AWS access key ID.
+- `CDS_AWS_SECRET_ACCESS_KEY`: AWS secret access key.
