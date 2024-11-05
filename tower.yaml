@@ -1,0 +1,3 @@
+reports:
+  reports/trace.csv":
+    display: "Nextflow trace file"

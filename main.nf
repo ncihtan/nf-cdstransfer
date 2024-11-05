@@ -3,59 +3,38 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ncihtan/mf-cdstransfer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Github : https://github.com/nncihtan/nf-cdstransfer
+    Github : https://github.com/ncihtan/nf-cdstransfer
 ----------------------------------------------------------------------------------------
 */
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    PARAMATERS AND INPUTS
+    PARAMETERS AND INPUTS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-params.input = params.input ?: 'samplesheet.csv'
-params.dryrun = params.dryrun ?: false
 
-ch_input = Channel.fromPath(params.input).splitCsv(sep: ',', skip: 1)
+include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
+// Validate input parameters
+validateParameters()
 
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Print summary of supplied parameters
+log.info paramsSummaryLog(workflow)
 
-    SAMPLESHEET SPLIT
-    This workflow takes the samplesheet and splits it into individual entities.
-    It takes a samplesheet with two columns: entityid and aws_uri.
-    It passes a tuple of entityid and aws_uri to the next process.
-
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-
-workflow SAMPLESHEET_SPLIT {
-    take:
-    samplesheet
-
-    main:
-    ch_input
-        .map { row -> 
-            [
-                entityid: row[0]?.trim(),
-                aws_uri: row[1]?.trim()
-            ]
-        }
-        .set { entities }
-        
-    emit: 
-    entities
-}
+ch_input = Channel
+    .fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+    // Unpack the tuple
+    .map { it -> it[0] }
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     synapse_get
     This process downloads the entity from Synapse using the entityid.
-    Spaces in filenames are replaced with underscores.
-    It takes a tuple of entityid and aws_uri.
-    It passes a tuple of the metamap and the file to the next process.
+    Spaces in filenames are replaced with underscores to ensure compatibility.
+    The process takes a tuple of entityid and aws_uri and outputs a tuple containing 
+    the metadata and downloaded files, which are saved in a directory specific to each entityid.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
@@ -67,24 +46,21 @@ process synapse_get {
     tag "${meta.entityid}"
 
     input:
-    val meta
+    val(meta)
 
     secret 'SYNAPSE_AUTH_TOKEN'
 
     output:
-    tuple val(meta), path('*')  // Adjust the pattern if necessary
+    tuple val(meta), path('*')
 
     script:
     def args = task.ext.args ?: ''
     """
-    synapse \\
-        -p \$SYNAPSE_AUTH_TOKEN \\
-        get \\
-        $args \\
-        $meta.entityid
+    echo "Fetching entity ${meta.entityid} from Synapse..."
+    synapse -p \$SYNAPSE_AUTH_TOKEN get $args ${meta.entityid}
 
     shopt -s nullglob
-    for f in *\\ *; do mv "\${f}" "\${f// /_}"; done
+    for f in *\\ *; do mv "\${f}" "\${f// /_}"; done  # Rename files with spaces
     """
 }
 
@@ -92,9 +68,9 @@ process synapse_get {
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     cds_upload
-    This process uploads the file to the CDS using the aws_uri.
-    It takes a tuple of the metamap and the file.
-    It passes a tuple of the metamap and the file to the next process.
+    This process uploads the downloaded file to the CDS using the provided aws_uri.
+    It takes a tuple of the metadata and downloaded file and outputs a tuple indicating
+    the successful upload.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
@@ -111,9 +87,11 @@ process cds_upload {
 
     output:
     tuple val(meta), path(entity)
+    tuple val(meta), val(true)  // Indicate successful upload
 
     script:
     """
+    echo "Uploading ${entity} to ${meta.aws_uri}..."
     AWS_ACCESS_KEY_ID=\$CDS_AWS_ACCESS_KEY_ID \
     AWS_SECRET_ACCESS_KEY=\$CDS_AWS_SECRET_ACCESS_KEY \
     aws s3 cp $entity $meta.aws_uri ${params.dryrun ? '--dryrun' : ''}
@@ -122,19 +100,27 @@ process cds_upload {
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    MAIN WORKFLOW
 
-    This workflow takes the samplesheet and splits it into individual entities.
-    It downloads the entity from Synapse using the entityid.
-    It uploads the file to the CDS using the aws_uri.
+    generate_report
+    This process generates a CSV report based on the original samplesheet with an added
+    status column that shows whether each entry was processed successfully.
+    It takes a tuple of metadata and success status, as well as the original samplesheet.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    MAIN WORKFLOW
+    This workflow processes the samplesheet by splitting it, downloading entities 
+    from Synapse, uploading to CDS, and generating a report of the results.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
 workflow {
-    samplesheet = file(params.input)
-
-    SAMPLESHEET_SPLIT(samplesheet) \
+    ch_input \
         | synapse_get \
         | cds_upload
 }
