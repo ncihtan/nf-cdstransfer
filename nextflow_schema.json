@@ -22,12 +22,12 @@
           "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row.",
           "fa_icon": "fas fa-file-csv"
         },
-        "dryrun": {
-          "type": "boolean",
-          "default": false,
-          "description": "Run the pipeline in dry-run mode",
-          "help_text": "If this parameter is set to true, the pipeline will not transfer any data, but will print out the commands that would be executed. This is useful for testing the pipeline before running it for real.",
-          "fa_icon": "fas fa-flask"
+        "aws_secret_prefix": {
+          "type": "string",
+          "default": "CDS",
+          "description": "Prefix for AWS secrets to be used in the pipeline.",
+          "help_text": "Specify the prefix for AWS secrets, e.g., 'HTAN'. This prefix will be used to load the corresponding AWS access key and secret key from {prefix}_ACCESS_KEY and {prefix}_SECRET_KEY secrets in the Nextflow secrets manager.",
+          "fa_icon": "fas fa-key"
         }
       }
     }

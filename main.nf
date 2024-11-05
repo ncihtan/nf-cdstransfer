@@ -82,8 +82,8 @@ process cds_upload {
 
     input:
     tuple val(meta), path(entity)
-    secret 'CDS_AWS_ACCESS_KEY_ID'
-    secret 'CDS_AWS_SECRET_ACCESS_KEY'
+    secret "${params.aws_secret_prefix}_AWS_ACCESS_KEY_ID"
+    secret "${params.aws_secret_prefix}_AWS_SECRET_ACCESS_KEY"
 
     output:
     tuple val(meta), path(entity)
@@ -92,8 +92,8 @@ process cds_upload {
     script:
     """
     echo "Uploading ${entity} to ${meta.aws_uri}..."
-    AWS_ACCESS_KEY_ID=\$CDS_AWS_ACCESS_KEY_ID \
-    AWS_SECRET_ACCESS_KEY=\$CDS_AWS_SECRET_ACCESS_KEY \
+    AWS_ACCESS_KEY_ID=\$${params.aws_secret_prefix}_AWS_ACCESS_KEY_ID \
+    AWS_SECRET_ACCESS_KEY=\$${params.aws_secret_prefix}_AWS_SECRET_ACCESS_KEY \
     aws s3 cp $entity $meta.aws_uri ${params.dryrun ? '--dryrun' : ''}
     """
 }
