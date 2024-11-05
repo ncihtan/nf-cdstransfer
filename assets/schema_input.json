@@ -12,14 +12,14 @@
           "pattern": "^syn\\d+$",
           "description": "Synapse entity ID starting with 'syn' followed by numbers.",
           "examples": ["syn123456"],
-          "meta": "entityid"
+          "meta": ["entityid"]
         },
         "file_url_in_cds": {
           "type": "string",
           "pattern": "^s3://.+",
           "description": "URL to the file location in AWS S3, must start with 's3://'.",
           "examples": ["s3://mybucket/path/to/file"],
-          "meta": "aws_uri"
+          "meta": ["aws_uri"]
         }
       },
       "required": ["entityId", "file_url_in_cds"],
