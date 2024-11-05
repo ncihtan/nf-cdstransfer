@@ -13,12 +13,20 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-params.input = params.input ?: 'samplesheet.csv'
-params.dryrun = params.dryrun ?: false
-params.output_report = params.output_report ?: 'output_report.csv'
 
-ch_input = Channel.fromPath(params.input).splitCsv(sep: ',', skip: 1)
+include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
+// Validate input parameters
+validateParameters()
+
+// Print summary of supplied parameters
+log.info paramsSummaryLog(workflow)
+
+// Create a new channel of metadata from a sample sheet passed to the pipeline through the --input parameter
+ch_input = Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+
+//ch_input = Channel.fromPath(params.input).splitCsv(sep: ',', skip: 1)
+ch_input.view()
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -51,6 +59,7 @@ workflow SAMPLESHEET_SPLIT {
             ]
         }
         .set { entities }
+
         
     emit: 
     entities
@@ -75,7 +84,7 @@ process synapse_get {
     tag "${meta.entityid}"
 
     input:
-    val meta
+    tuple val(meta)
 
     secret 'SYNAPSE_AUTH_TOKEN'
 
@@ -180,7 +189,7 @@ process generate_report {
 workflow {
     samplesheet = file(params.input)
 
-    SAMPLESHEET_SPLIT(samplesheet) \
+    ch_input \
         | synapse_get \
         | cds_upload \
         | generate_report

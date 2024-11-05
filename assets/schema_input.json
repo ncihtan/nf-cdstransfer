@@ -1,23 +1,28 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://raw.githubusercontent.com/nf-core/rnaseq/master/assets/schema_input.json",
-    "title": "nf-core/rnaseq pipeline - params.input schema",
-    "description": "Schema for the file provided with params.input",
+    "$id": "https://example.com/samplesheet.schema.json",
+    "title": "Samplesheet Schema",
+    "description": "Schema for validating rows in a CSV samplesheet.",
     "type": "array",
     "items": {
-        "type": "object",
-        "properties": {
-            "entityId": {
-                "type": "string",
-                "pattern": "^syn\\d+$",
-                "errorMessage": "Synapse entity id starting with 'syn' followed by numbers"
-            },
-            "file_url_in_cds": {
-                "type": "string",
-                "pattern": "^s3://.+",
-                "errorMessage": "Destination S3 URLs must start with 's3://'"
-            }
+      "type": "object",
+      "properties": {
+        "entityId": {
+          "type": "string",
+          "pattern": "^syn\\d+$",
+          "description": "Synapse entity ID starting with 'syn' followed by numbers.",
+          "examples": ["syn123456"],
+          "meta": "entityid"
         },
-        "required": ["entityId", "file_url_in_cds"]
+        "file_url_in_cds": {
+          "type": "string",
+          "pattern": "^s3://.+",
+          "description": "URL to the file location in AWS S3, must start with 's3://'.",
+          "examples": ["s3://mybucket/path/to/file"],
+          "meta": "aws_uri"
+        }
+      },
+      "required": ["entityId", "file_url_in_cds"],
+      "additionalProperties": false
     }
-}
+  }
