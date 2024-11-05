@@ -22,48 +22,10 @@ validateParameters()
 // Print summary of supplied parameters
 log.info paramsSummaryLog(workflow)
 
-// Create a new channel of metadata from a sample sheet passed to the pipeline through the --input parameter
-ch_input = Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
-
-//ch_input = Channel.fromPath(params.input).splitCsv(sep: ',', skip: 1)
-ch_input.view()
-
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    SAMPLESHEET SPLIT
-    This workflow takes the samplesheet and splits it into individual entities.
-    It expects a samplesheet with two columns: entityid and aws_uri.
-    Each row is passed as a tuple of entityid and aws_uri to the next process.
-
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-
-workflow SAMPLESHEET_SPLIT {
-    take:
-    samplesheet
-
-    main:
-    ch_input
-        .filter { row -> 
-            // Validate each row to ensure it has entityid and aws_uri
-            def isValid = row[0]?.trim() && row[1]?.trim()
-            if (!isValid) println "Warning: Skipping invalid row with missing entityid or aws_uri -> ${row}"
-            return isValid
-        }
-        .map { row -> 
-            // Map each row to a tuple of entityid and aws_uri
-            [
-                entityid: row[0]?.trim(),
-                aws_uri: row[1]?.trim()
-            ]
-        }
-        .set { entities }
-
-        
-    emit: 
-    entities
-}
+ch_input = Channel
+    .fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+    // Unpack the tuple
+    .map { it -> it[0] }
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -84,12 +46,12 @@ process synapse_get {
     tag "${meta.entityid}"
 
     input:
-    tuple val(meta)
+    val(meta)
 
     secret 'SYNAPSE_AUTH_TOKEN'
 
     output:
-    tuple val(meta), path("*")
+    tuple val(meta), path('*')
 
     script:
     def args = task.ext.args ?: ''
@@ -147,35 +109,6 @@ process cds_upload {
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-process generate_report {
-    input:
-    tuple val(meta), val(success)
-    path samplesheet
-
-    output:
-    path(params.output_report)
-
-    script:
-    """
-    echo "Generating report..."
-    import csv
-
-    with open('${samplesheet}', 'r') as infile, open('${params.output_report}', 'w') as outfile:
-        reader = csv.reader(infile)
-        writer = csv.writer(outfile)
-
-        // Add a header for the output file
-        header = next(reader) + ['Status']
-        writer.writerow(header)
-
-        // Write each row with the status
-        for row in reader:
-            entity_id = row[0].strip()
-            status = 'Completed' if entity_id == meta['entityid'] and success else 'Failed'
-            writer.writerow(row + [status])
-    """
-}
-
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -187,10 +120,7 @@ process generate_report {
 */
 
 workflow {
-    samplesheet = file(params.input)
-
     ch_input \
         | synapse_get \
-        | cds_upload \
-        | generate_report
+        | cds_upload
 }
