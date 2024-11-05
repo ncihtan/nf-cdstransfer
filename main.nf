@@ -88,11 +88,6 @@ process synapse_get {
     echo "Fetching entity ${meta.entityid} from Synapse..."
     synapse -p \$SYNAPSE_AUTH_TOKEN get $args ${meta.entityid}
 
-    if [[ $? -ne 0 ]]; then
-        echo "Error: Failed to download entity ${meta.entityid}."
-        exit 1
-    fi
-
     shopt -s nullglob
     for f in *\\ *; do mv "\${f}" "\${f// /_}"; done  # Rename files with spaces
     """
@@ -129,11 +124,6 @@ process cds_upload {
     AWS_ACCESS_KEY_ID=\$CDS_AWS_ACCESS_KEY_ID \
     AWS_SECRET_ACCESS_KEY=\$CDS_AWS_SECRET_ACCESS_KEY \
     aws s3 cp $entity $meta.aws_uri ${params.dryrun ? '--dryrun' : ''}
-
-    if [[ $? -ne 0 ]]; then
-        echo "Error: Failed to upload ${entity} to ${meta.aws_uri}."
-        exit 1
-    fi
     """
 }
 
@@ -174,11 +164,6 @@ process generate_report {
             entity_id = row[0].strip()
             status = 'Completed' if entity_id == meta['entityid'] and success else 'Failed'
             writer.writerow(row + [status])
-
-    if [[ $? -ne 0 ]]; then
-        echo "Error: Failed to generate the report."
-        exit 1
-    fi
     """
 }
 
