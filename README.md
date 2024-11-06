@@ -66,23 +66,33 @@ The `CDS_UPLOAD` process uploads the files downloaded from Synapse to an AWS S3 
 - Ensure you have access to the necessary containers (`synapseclient`, `awscli`).
 - Ensure you have the appropriate credentials for Synapse and AWS.
 
-### Command
+### Example usage
+
 Run the workflow with the following command:
 
 ```bash
-nextflow run main.nf --input path/to/samplesheet.csv
-```
-
-### Example
-
-```bash
-nextflow run main.nf --input samplesheet.csv
+nextflow run ncihtan/nf-cdstransfer --input path/to/samplesheet.csv
 ```
 
 Using the test profile will use a built in samplesheet. Note that this requires your provided AWS credentials have acccess to the Sage test bucket `s3://htan-cds-transfer-test-bucket`
 
 ```bash
-nextflow run main.nf -profile test
+nextflow run ncihtan/nf-cdstransfer -profile test
+```
+
+To avoid having to reset secrets when moving between destination accounts you can set your secrets
+using a prefix
+
+```bash
+nextflow secrets set MYCREDS_AWS_ACCESS_KEY_ID
+nextflow secrets set MYCREDS_AWS_SECRET_ACCESS_KEY
+nextflow run ncihtan/nf-cdstransfer --aws_secret_prefix MYCREDS
+```
+
+or use a configured profile in which params.aws_secret_prefix is set
+
+```bash
+nextflow run ncihtan/nf-cdstransfer -profile CDS --input samplesheet.csv
 ```
 
 ### Outputs
@@ -93,5 +103,5 @@ nextflow run main.nf -profile test
 The following environment variables should be set with your credentials:
 
 - `SYNAPSE_AUTH_TOKEN`: Synapse authentication token.
-- `CDS_AWS_ACCESS_KEY_ID`: AWS access key ID.
-- `CDS_AWS_SECRET_ACCESS_KEY`: AWS secret access key.
+- `<params.aws_secret_prefix>_AWS_ACCESS_KEY_ID`: AWS access key ID. eg `CDS_AWS_ACCESS_KEY_ID`
+- `<params.aws_secret_prefix>`: AWS secret access key. eg `CDS_AWS_SECRET_ACCESS_KEY`
