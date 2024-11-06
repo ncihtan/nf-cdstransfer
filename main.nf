@@ -41,7 +41,7 @@ ch_input = Channel
 
 process synapse_get {
 
-    container "quay.io/sagebionetworks/synapsepythonclient:v2.5.1"
+    container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
 
     tag "${meta.entityid}"
 
