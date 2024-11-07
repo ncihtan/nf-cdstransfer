@@ -142,7 +142,7 @@ Run the workflow with the following command:
 nextflow run ncihtan/nf-cdstransfer --input path/to/samplesheet.csv
 ```
 
-Using the test profile will use a built in samplesheet. Note that this requires your provided AWS credentials have acccess to the Sage test bucket `s3://htan-cds-transfer-test-bucket`
+Using the test profile will use `samplesheet.csv` when stored in your projectDir. Please generate your own samplesheet and use aws_secret_prefix `TEST` when setting your relevent AWS Nextflow secrets
 
 ```bash
 nextflow run ncihtan/nf-cdstransfer -profile test
