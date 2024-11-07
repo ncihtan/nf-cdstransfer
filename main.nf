@@ -63,6 +63,13 @@ process synapse_get {
     shopt -s nullglob
     for f in *\\ *; do mv "\${f}" "\${f// /_}"; done  # Rename files with spaces
     """
+
+    stub:
+    """
+    echo "Making a fake file for testing..."
+    ## Make a random file of 1MB and save to small_file.tmp
+    dd if=/dev/urandom of=small_file.tmp bs=1M count=1
+    """
 }
 
 /*
@@ -96,6 +103,11 @@ process cds_upload {
     AWS_ACCESS_KEY_ID=\$${params.aws_secret_prefix}_AWS_ACCESS_KEY_ID \
     AWS_SECRET_ACCESS_KEY=\$${params.aws_secret_prefix}_AWS_SECRET_ACCESS_KEY \
     aws s3 cp $entity $meta.aws_uri ${params.dryrun ? '--dryrun' : ''}
+    """
+
+    stub:
+    """
+    echo "Making a fake upload..."
     """
 }
 
