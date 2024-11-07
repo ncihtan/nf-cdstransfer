@@ -26,7 +26,7 @@ ch_input = Channel
     .fromList(samplesheetToList(params.input, "assets/schema_input.json"))
     // Unpack the tuple
     .map { it -> it[0] }
-    // If change_bucket is procided then regex replace the bucket name in aws_uri. eg if change_buckert = bucket2 then s3://bucket1/key1 -> s3://bucket2/key1
+    // If change_bucket is provided then regex replace the bucket name in aws_uri. eg if change_buckert = bucket2 then s3://bucket1/key1 -> s3://bucket2/key1
     .map { it ->
         // Check if `change_bucket` is provided and update `aws_uri` if needed
         if (params.change_bucket) {
