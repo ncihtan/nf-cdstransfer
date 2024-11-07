@@ -42,8 +42,7 @@
           "description": "Prefix for AWS secrets to be used in the pipeline.",
           "help_text": "Specify the prefix for AWS secrets, e.g., 'HTAN'. This prefix will be used to load the corresponding AWS access key and secret key from {prefix}_ACCESS_KEY and {prefix}_SECRET_KEY secrets in the Nextflow secrets manager.",
           "fa_icon": "fas fa-key"
-        }
-        ,
+        },
         "change_bucket": {
           "type": "string",
           "description": "Bucket name to replace those in the input file",
