@@ -1,0 +1,6 @@
+entityId,file_url_in_cds
+syn26947830,s3://htan-cds-transfer-test-bucket/test2/test2_object1.png
+syn26947830,s3://htan-cds-transfer-test-bucket/test2/test2_object2.png
+syn26947830,s3://htan-cds-transfer-test-bucket/test2/test2_object3.png
+syn26947830,s3://htan-cds-transfer-test-bucket/test2/test2_object4.png
+syn26947830,s3://htan-cds-transfer-test-bucket/test2/test2_object5.png
