@@ -2,62 +2,130 @@
 
 ## Overview
 
-This Nextflow workflow is designed to process a sample sheet (`samplesheet.csv`), retrieve files from Synapse based on `entityId`, and upload them to an AWS S3 bucket. The workflow consists of three main steps:
+This Nextflow workflow is designed to process a sample sheet (`samplesheet.csv`), retrieve files from Synapse based on `entityId`, and upload them to an AWS S3 bucket. 
 
-1. **SAMPLESHEET_SPLIT**: Filters and samples rows from the input CSV based on file size and retrieves relevant metadata.
-2. **SYNAPSE_GET**: Downloads the files from Synapse using the `entityId` from the sample sheet.
-3. **CDS_UPLOAD**: Uploads the downloaded files to a specified AWS S3 bucket.
+ [!NOTE]  
+The workflow consists of two main steps:
+
+1. **synapse_get**: Downloads the files from Synapse using the `entityId` from the sample sheet.
+3. **cds_upload**: Uploads the downloaded files to a specified AWS S3 bucket.
+
+### Example Usage
+```bash
+nextflow run ncihtan/nf-cdstransfer --input samplesheet.csv
+```
 
 ## Input
 
 ### Parameters
-- **params.input**: The path to the sample sheet CSV file (`samplesheet.csv`). This file should include columns like `entityId`, `file_url_in_cds`, and `File_Size`.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| input | `str` | Path to input samplesheet CSV file containing entityId and aws_uri columns. Required. |
+| take_n | `int` | Number of samples to process from the samplesheet. Use -1 to process all samples. Default: `-1` |
+| dryrun | `bool` | If true, adds `--dryrun` flag to AWS copy commands for testing without actual file transfer. Default: `false` |
+| aws_secret_prefix | `str` | Prefix for AWS credential environment variables. Used to construct variable names like `${aws_secret_prefix}_AWS_ACCESS_KEY_ID`. Useful for managing multiple AWS credential sets. Default: `""` |
 
 ## Workflow Details
 
-### Step 1: SAMPLESHEET_SPLIT
+### Overview
+The workflow transfers files from Synapse to CDS (Cloud Data Service) in three main steps:
+1. Read and parse input samplesheet
+2. Download files from Synapse
+3. Upload files to CDS S3 bucket
+4. Generate transfer report
 
-The `SAMPLESHEET_SPLIT` workflow reads the input CSV file, filters the rows based on the file size, randomly samples five rows, and maps the necessary metadata.
+### Secrets
+
+Nextflow secrets are used to ensure that tokens, keys and secrets are not exposed
+
+
+The following Nextflow secrets should be set:
+
+- `SYNAPSE_AUTH_TOKEN`: Synapse authentication token.
+- `<params.aws_secret_prefix>_AWS_ACCESS_KEY_ID`: AWS access key ID. eg `CDS_AWS_ACCESS_KEY_ID`
+- `<params.aws_secret_prefix>`: AWS secret access key. eg `CDS_AWS_SECRET_ACCESS_KEY`
+
+```
+nextflow secrets set SYNAPSE_AUTH_TOKEN <SUPER_SECRET_THING>
+```
+
+
+### Input Samplesheet Requirements
+
+| Field | Required | Pattern | Description | Example |
+|-------|----------|--------|-------------|---------|
+| entityId | Yes | `^syn\d+$` | Synapse entity ID starting with 'syn' followed by numbers | `syn123456` |
+| file_url_in_cds | Yes | `^s3://.+` | URL to the file location in AWS S3, must start with 's3://' | `s3://mybucket/path/to/file` |
+
+Notes:
+- Additional columns are allowed but not validated
+- Both fields are mapped internally:
+  - `entityId` → `entityid`
+  - `file_url_in_cds` → `aws_uri`
+
+### Configuration
+
+#### Plugins Used
+The workflow uses the following plugins:
+- `nf-schema`: For parameter validation and schema management
+- `nf-boost`: For enhanced functionality and utilities
+
+## Default settings
+
+The included `nextflow.config` file specifies the following default options. These are used if not overridden by a custom config or profile.
+
+- `docker.enabled = true`
+
+#### Profiles
+The `nextflow.config` file defines several profiles to customize the workflow execution. Below are the available profiles and the parameters/settings they configure:
+
+| Setting / Profile         | test                        | CDS   | local  | docker | tower                   |
+|--------------------------|------------------------------|-------|--------|--------|-------------------------|
+| params.input             | $projectDir/samplesheet.csv  | -     | -      | -      | -                       |
+| params.aws_secret_prefix | TEST                         | CDS   | -      | -      | -                       |
+| params.dryrun            | true                         | -     | -      | -      | -                       |
+| docker.enabled           | true                         | true  | true   | true   | true                    |
+| process.executor         | local                        | -     | local  | -      | -                       |
+| process.cpus             |                              | -     | -      | -      | 1 * task.attempt        |
+| process.memory           |                              | -     | -      | -      | 1.GB * task.attempt     |
+| process.maxRetries       |                              | -     | -      | -      | 3                       |
+| process.errorStrategy    |                              | -     | -      | -      | retrys                  |
+
+
+### Process 1: `synapse_get`
+Downloads files from Synapse using entityIds.
 
 #### Input
-- `samplesheet.csv`: A CSV file with columns including `entityId`, `file_url_in_cds`, and `File_Size`.
-
-#### Processing
-- Filters rows where `File_Size` is less than 50 MB.
-- Randomly samples 5 rows from the filtered data.
-- Maps `entityId` and `aws_uri` (file URL in S3) from the CSV.
+- `meta`: Object containing `entityId` and `aws_uri`
 
 #### Output
-- A set of tuples containing `entityid` and `aws_uri`.
-
-### Step 2: SYNAPSE_GET
-
-The `SYNAPSE_GET` process downloads files from Synapse based on the `entityId` retrieved from the sample sheet.
-
-#### Input
-- `entityid`: The Synapse `entityId` used to identify and download files.
-
-#### Output
-- A tuple containing the `meta` information and the downloaded file path.
+- Tuple of (`meta`, downloaded file path)
 
 #### Dependencies
-- Requires a Synapse authentication token (`SYNAPSE_AUTH_TOKEN`).
+- Requires `SYNAPSE_AUTH_TOKEN` secret
+- Uses `synapsepythonclient` container
 
-### Step 3: CDS_UPLOAD
-
-The `CDS_UPLOAD` process uploads the files downloaded from Synapse to an AWS S3 bucket using the AWS CLI.
+### Process 2: `cds_upload`
+Uploads downloaded files to CDS S3 bucket.
 
 #### Input
-- `meta`: The metadata associated with the file, including the destination S3 URI.
-- `entity`: The path to the file that will be uploaded.
+- Tuple of (`meta`, file path) from `synapse_get`
 
 #### Output
-- A tuple containing the `meta` information and the file path after upload.
+- Tuple of (`meta`, upload success boolean)
 
 #### Dependencies
-- Requires AWS credentials set as `CDS_AWS_ACCESS_KEY_ID`, `CDS_AWS_SECRET_ACCESS_KEY` (note `CDS_` prefix)
+- Requires AWS credentials:
+  - `${aws_secret_prefix}_AWS_ACCESS_KEY_ID`
+  - `${aws_secret_prefix}_AWS_SECRET_ACCESS_KEY`
+- Uses AWS CLI container
 
-  Set these as `nextflow secrets set CDS_AWS_ACCESS_KEY_ID <your_access_key_id>`
+#### Output
+No specific outputs are generated by the workflow.  
+By default a trace file is saved to `reports/trace.csv`
+
+
 
 ## Running the Workflow
 
@@ -74,7 +142,7 @@ Run the workflow with the following command:
 nextflow run ncihtan/nf-cdstransfer --input path/to/samplesheet.csv
 ```
 
-Using the test profile will use a built in samplesheet. Note that this requires your provided AWS credentials have acccess to the Sage test bucket `s3://htan-cds-transfer-test-bucket`
+Using the test profile will use `samplesheet.csv` when stored in your projectDir. Please generate your own samplesheet and use aws_secret_prefix `TEST` when setting your relevent AWS Nextflow secrets
 
 ```bash
 nextflow run ncihtan/nf-cdstransfer -profile test
@@ -95,13 +163,3 @@ or use a configured profile in which params.aws_secret_prefix is set
 nextflow run ncihtan/nf-cdstransfer -profile CDS --input samplesheet.csv
 ```
 
-### Outputs
-- The final output will be the files successfully uploaded to the specified AWS S3 bucket.
-
-## Secrets
-
-The following environment variables should be set with your credentials:
-
-- `SYNAPSE_AUTH_TOKEN`: Synapse authentication token.
-- `<params.aws_secret_prefix>_AWS_ACCESS_KEY_ID`: AWS access key ID. eg `CDS_AWS_ACCESS_KEY_ID`
-- `<params.aws_secret_prefix>`: AWS secret access key. eg `CDS_AWS_SECRET_ACCESS_KEY`

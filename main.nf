@@ -41,7 +41,8 @@ ch_input = Channel
 
 process synapse_get {
 
-    container "quay.io/sagebionetworks/synapsepythonclient:v2.5.1"
+    // TODO: Update the container to the latest tag when available
+    container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
 
     tag "${meta.entityid}"
 
@@ -101,20 +102,9 @@ process cds_upload {
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    generate_report
-    This process generates a CSV report based on the original samplesheet with an added
-    status column that shows whether each entry was processed successfully.
-    It takes a tuple of metadata and success status, as well as the original samplesheet.
-
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
     MAIN WORKFLOW
     This workflow processes the samplesheet by splitting it, downloading entities 
-    from Synapse, uploading to CDS, and generating a report of the results.
+    from Synapse and uploading to CDS.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
