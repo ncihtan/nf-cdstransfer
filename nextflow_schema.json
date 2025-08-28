@@ -2,101 +2,59 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/ncihtan/nf-cdstransfer/main/nextflow_schema.json",
   "title": "nf-cdstransfer",
-  "description": "Workflow to transfer data from Synapse to CRDC",
+  "description": "Workflow to transfer data from Synapse to CDS",
   "type": "object",
-
   "definitions": {
     "input_output_options": {
       "title": "Input/output options",
       "type": "object",
       "fa_icon": "fas fa-terminal",
-      "description": "Where the pipeline finds input and how it behaves.",
+      "description": "Define where the pipeline should find input data and save output data.",
       "required": ["input"],
       "properties": {
         "input": {
-          "description": "CSV with entities to transfer (local path or URL).",
-          "help_text": "Comma-separated file with a header row. May be a local path or a Tower Dataset URL.",
-          "fa_icon": "fas fa-file-csv",
-          "oneOf": [
-            {
-              "type": "string",
-              "format": "uri",
-              "pattern": "^https?://.+\\.csv$"
-            },
-            {
-              "type": "string",
-              "format": "file-path",
-              "exists": true,
-              "mimetype": "text/csv",
-              "pattern": "^\\S+\\.csv$"
-            }
-          ]
+          "type": "string",
+          "format": "file-path",
+          "exists": true,
+          "mimetype": "text/csv",
+          "pattern": "^\\S+\\.csv$",
+          "description": "Path to comma-separated file containing information about entities to be transferred",
+          "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row.",
+          "fa_icon": "fas fa-file-csv"
         },
         "dryrun": {
           "type": "boolean",
           "default": false,
-          "description": "Run in dry-run mode",
-          "help_text": "No data will be uploaded. The pipeline prepares configs and prints commands.",
+          "description": "Run the pipeline in dry-run mode",
+          "help_text": "If this parameter is set to true, the pipeline will not transfer any data, but will print out the commands that would be executed. This is useful for testing the pipeline before running it for real.",
           "fa_icon": "fas fa-flask"
         },
         "take_n": {
           "type": "integer",
           "default": -1,
-          "description": "Process only the first N rows; -1 = all",
-          "help_text": "For testing, set to a small positive integer. The workflow only applies the limit if > 0.",
+          "description": "Only take the first N rows of the input file. Set to -1 to read all rows.",
+          "help_text": "Use this parameter to limit the number of rows read from the input file. This is useful for testing the pipeline on a subset of the data before running it for real.",
           "fa_icon": "fas fa-filter"
+        },
+        "aws_secret_prefix": {
+          "type": "string",
+          "default": "CDS",
+          "description": "Prefix for AWS secrets to be used in the pipeline.",
+          "help_text": "Specify the prefix for AWS secrets, e.g., 'HTAN'. This prefix will be used to load the corresponding AWS access key and secret key from {prefix}_ACCESS_KEY and {prefix}_SECRET_KEY secrets in the Nextflow secrets manager.",
+          "fa_icon": "fas fa-key"
         },
         "change_bucket": {
           "type": "string",
-          "description": "Replace bucket names inside aws_uri (if present)",
-          "help_text": "If provided, s3://old-bucket/key → s3://{change_bucket}/key in any aws_uri column.",
+          "description": "Bucket name to replace those in the input file",
+          "help_text": "Replaces the bucket names in the input file with the specified bucket name. This is useful when you want to transfer data to a different bucket than the one specified in the input file.",
           "fa_icon": "fas fa-bucket"
-        }
-      }
-    },
-
-    "crdc_options": {
-      "title": "CRDC uploader options",
-      "type": "object",
-      "fa_icon": "fas fa-cloud-upload-alt",
-      "description": "Parameters used to contact CRDC and control uploads.",
-      "properties": {
-        "crdc_api_url": {
-          "type": "string",
-          "format": "uri",
-          "description": "CRDC API base URL",
-          "help_text": "Example: https://data.submission.cancer.gov",
-          "fa_icon": "fas fa-link"
-        },
-        "crdc_submission": {
-          "type": "string",
-          "pattern": "^[0-9a-fA-F-]{36}$",
-          "description": "CRDC submission ID (UUID)",
-          "help_text": "You can also provide this as env/secret CRDC_SUBMISSION.",
-          "fa_icon": "fas fa-id-badge"
-        },
-        "crdc_overwrite": {
-          "type": "boolean",
-          "default": false,
-          "description": "Allow overwriting existing submissions",
-          "help_text": "Set true to allow overwriting existing files in CRDC.",
-          "fa_icon": "fas fa-exchange-alt"
-        },
-        "crdc_retries": {
-          "type": "integer",
-          "default": 3,
-          "minimum": 0,
-          "description": "Number of times to retry failed uploads",
-          "help_text": "Defaults to 3 retries per file.",
-          "fa_icon": "fas fa-redo"
         }
       }
     }
   },
-
   "allOf": [
-    { "$ref": "#/definitions/input_output_options" },
-    { "$ref": "#/definitions/crdc_options" }
+    {
+      "$ref": "#/definitions/input_output_options"
+    }
   ]
 }
-
