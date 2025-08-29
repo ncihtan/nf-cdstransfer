@@ -97,18 +97,21 @@ process synapse_get {
     tuple val(meta), path('*')
 
     script:
-    def args = (task.ext.args ?: '').toString()   // e.g. "-r" for folders if needed
+    // allow folder recursion via `-process.ext.args='-r'`
+    def args = (task.ext.args ?: '').toString()
     def eid  = eidOf(meta)
+    // shorten / extend this as you like
+    def hardTimeoutSec = task.ext.timeout_sec ?: 600  // 10 min
+
     """
     #!/usr/bin/env bash
-    set -euxo pipefail
+    set -euo pipefail
 
-    # Harden env to avoid hidden prompts/hangs
     export PYTHONUNBUFFERED=1
-    export PYTHONIOENCODING=UTF-8
     export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
-    export HOME="\$PWD"
-    mkdir -p "\$HOME" || true
+    export HOME="\$PWD"                 # make synapse config/cache local
+    export SYNAPSE_CACHE_DIR="\$PWD/.synapseCache"
+    mkdir -p "\$SYNAPSE_CACHE_DIR"
 
     echo "== synapse_get =="
     echo "Entity ID: ${eid}"
@@ -121,20 +124,54 @@ process synapse_get {
     echo "Token length (masked): \${#SYNAPSE_AUTH_TOKEN}"
 
     # Quick egress probe
-    set +e
-    curl -fsSI --max-time 10 https://www.synapse.org >/dev/null
-    curl_ok=\$?
-    set -e
-    if [ "\$curl_ok" -ne 0 ]; then
-      echo "ERROR: Network/egress check to synapse.org failed (code \$curl_ok)" >&2
+    if ! curl -fsSI --max-time 10 https://www.synapse.org >/dev/null; then
+      echo "ERROR: Network/egress check to synapse.org failed" >&2
       exit 1
     fi
 
     # Non-interactive login
     synapse login --silent --authToken "\$SYNAPSE_AUTH_TOKEN"
 
-    echo "Downloading: synapse get ${args} ${eid} --downloadLocation ."
-    timeout 1800 synapse --debug get ${args} ${eid} --downloadLocation . 2>&1 | tee synapse_debug.log
+    echo "Starting download (timeout: ${hardTimeoutSec}s): synapse get ${args} ${eid} --downloadLocation ."
+    # Run download in background and capture PID; also tee debug log
+    ( synapse --debug get ${args} ${eid} --downloadLocation . 2>&1 | tee synapse_debug.log ) &
+    DL_PID=\$!
+
+    start_ts=\$(date +%s)
+    last_bytes=-1
+    stagnant_cnt=0
+
+    # Heartbeat & progress loop
+    while kill -0 "\$DL_PID" 2>/dev/null; do
+      now=\$(date +%s)
+      elapsed=\$(( now - start_ts ))
+      # Sum sizes of any regular files in CWD (excluding our own logs) + cache dir
+      cwd_bytes=\$(find . -maxdepth 1 -type f ! -name "synapse_debug.log" ! -name ".command*" -printf "%s\\n" | awk '{s+=\$1} END{print s+0}')
+      cache_bytes=\$(find "\$SYNAPSE_CACHE_DIR" -type f -printf "%s\\n" 2>/dev/null | awk '{s+=\$1} END{print s+0}')
+      total_bytes=\$(( cwd_bytes + cache_bytes ))
+      echo "heartbeat elapsed=\${elapsed}s total_bytes=\${total_bytes} cwd=\${cwd_bytes} cache=\${cache_bytes} \$(date -Is)"
+
+      # detect no growth
+      if [ "\$total_bytes" -eq "\$last_bytes" ]; then
+        stagnant_cnt=\$(( stagnant_cnt + 1 ))
+      else
+        stagnant_cnt=0
+        last_bytes=\$total_bytes
+      fi
+
+      # Hard timeout
+      if [ "\$elapsed" -ge ${hardTimeoutSec} ]; then
+        echo "ERROR: Download exceeded ${hardTimeoutSec}s; killing synapse get" >&2
+        kill "\$DL_PID" 2>/dev/null || true
+        sleep 2
+        kill -9 "\$DL_PID" 2>/dev/null || true
+        exit 124
+      fi
+
+      sleep 15
+    done
+
+    wait "\$DL_PID" || { echo "ERROR: synapse get exited with non-zero status" >&2; exit 2; }
 
     echo "Listing after download:"
     ls -lAh || true
@@ -146,16 +183,16 @@ process synapse_get {
     echo "Final listing:"
     ls -lAh || true
 
-    # Require that at least one real file (exclude debug & nextflow files) exists
+    # Require that at least one real file (exclude logs/nextflow)
     found=\$(find . -maxdepth 1 -type f ! -name "synapse_debug.log" ! -name ".command*" -printf '.' | wc -c)
     if [ "\$found" -eq 0 ]; then
       echo "ERROR: No files were downloaded for ${eid}" >&2
-      exit 2
+      exit 3
     fi
 
     echo "__SYNAPSE_GET_DONE__ \$(date -Is)"
     """
-
+    
     stub:
     """
     echo "Stub: creating a fake file for testing..."
