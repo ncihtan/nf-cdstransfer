@@ -3,16 +3,16 @@
   "$id": "https://example.com/nextflow_schema.json",
   "title": "CRDC Uploader Pipeline Schema",
   "description": "Parameters for the Nextflow pipeline.",
+
   "type": "object",
   "properties": {
     "input": {
       "type": "string",
-      "description": "Path/URL to samplesheet CSV (defaults to repo copy in main.nf).",
-      "default": "samplesheet.csv"
+      "description": "Path or URL to the samplesheet CSV file. If omitted, defaults to samplesheet.csv in the repo root (resolved in main.nf)."
     },
     "dry_run": {
       "type": "boolean",
-      "description": "Generate configs/metadata but skip actual CRDC upload.",
+      "description": "Generate configs/metadata but skip the actual CRDC upload.",
       "default": false
     },
     "overwrite": {
@@ -21,5 +21,5 @@
       "default": true
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }
