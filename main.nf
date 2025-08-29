@@ -9,8 +9,18 @@ nextflow.enable.dsl = 2
 
 include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
-// Default to the bundled samplesheet.csv in the repo root
-params.input = params.input ?: "$projectDir/samplesheet.csv"
+// ---- Resolve samplesheet path WITHOUT reassigning params.input ----
+// Default filename if --input not provided
+def _rawInput = params.input ?: 'samplesheet.csv'
+// Is it a URL?
+def _isUrl    = _rawInput ==~ /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//
+// Is it absolute?
+def _isAbs    = file(_rawInput).isAbsolute()
+// If not URL and not absolute, make it projectDir-relative
+def resolved_input = (!_isUrl && !_isAbs) ? file("${projectDir}/${_rawInput}") : file(_rawInput)
+
+log.info "projectDir = ${projectDir}"
+log.info "Samplesheet (resolved) = ${resolved_input}"
 
 // Validate input parameters
 validateParameters()
@@ -18,19 +28,10 @@ validateParameters()
 // Print summary of supplied parameters
 log.info paramsSummaryLog(workflow)
 
-// Ensure params.input points into the repo if it's a relative path
-def _in = params.input ?: 'samplesheet.csv'
-def _isUrl = _in ==~ /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//
-def _isAbs = file(_in).isAbsolute()
-
-params.input = (!_isUrl && !_isAbs) ? file("${projectDir}/${_in}").toString() : _in
-
-log.info "projectDir = ${projectDir}"
-log.info "Resolved params.input = ${params.input}"
-
 // Build channel of meta maps from samplesheet
 ch_input = Channel
-    .fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+    .fromList(samplesheetToList(resolved_input.toString(), "assets/schema_input.json"))
+
 /*
 ================================================================================
  PROCESS: synapse_get
@@ -271,5 +272,3 @@ workflow {
   ch_cfg.view  { meta, yml -> "CONFIG:\t${meta.entityId}\t${yml}" }
   ch_up.view   { meta, log -> "UPLOAD:\t${meta.entityId}\t${log}" }
 }
-
-
