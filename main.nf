@@ -18,6 +18,16 @@ validateParameters()
 // Print summary of supplied parameters
 log.info paramsSummaryLog(workflow)
 
+// Ensure params.input points into the repo if it's a relative path
+def _in = params.input ?: 'samplesheet.csv'
+def _isUrl = _in ==~ /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//
+def _isAbs = file(_in).isAbsolute()
+
+params.input = (!_isUrl && !_isAbs) ? file("${projectDir}/${_in}").toString() : _in
+
+log.info "projectDir = ${projectDir}"
+log.info "Resolved params.input = ${params.input}"
+
 // Build channel of meta maps from samplesheet
 ch_input = Channel
     .fromList(samplesheetToList(params.input, "assets/schema_input.json"))
