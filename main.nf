@@ -34,16 +34,11 @@ ch_input = Channel.fromList( samplesheetToList(resolved_input, "assets/schema_in
 
 // ---------- Helpers ----------
 
-// Prefer entityId/entityid/entity_id if Map; if List, pick first value matching syn\d+
+// Prefer entityId/entityid/entity_id if Map; if List, find first value matching syn\d+
 def eidOf = { m ->
-  if (m instanceof Map) {
-    return m.entityId ?: m.entityid ?: m.entity_id
-  }
-  if (m instanceof List) {
-    def hit = m.find { it instanceof CharSequence && (it ==~ /syn\d+/) }
-    return hit ?: 'unknown_syn'
-  }
-  return 'unknown_syn'
+  if (m instanceof Map)  return m.entityId ?: m.entityid ?: m.entity_id
+  if (m instanceof List) return (m.find { it instanceof CharSequence && (it ==~ /syn\d+/) } ?: 'unknown_syn')
+  'unknown_syn'
 }
 
 // Get first existing field from a Map using a list of candidate keys
@@ -51,9 +46,8 @@ def getf = { m, List<String> keys, def defval = '' ->
   (m instanceof Map) ? (keys.findResult { k -> m.containsKey(k) && m[k] != null && m[k].toString().trim() ? m[k] : null } ?: defval) : defval
 }
 
-// When meta is a List, heuristically guess fields
+// Heuristic guesses when a row is a List (best-effort only)
 def guessFromList = { List row ->
-  // helpers
   def firstMatch = { Closure<Boolean> pred -> row.find { it instanceof CharSequence && pred(it as CharSequence) } ?: '' }
   def isMd5      = { CharSequence s -> s ==~ /(?i)^[a-f0-9]{32}$/ }
   def isNumber   = { CharSequence s -> s ==~ /^\d+$/ }
@@ -62,7 +56,7 @@ def guessFromList = { List row ->
 
   [
     study_phs_accession : firstMatch { it ==~ /^phs\d{6,}$/ },
-    participant_id      : '',  // not reliable to guess from free list
+    participant_id      : '',
     sample_id           : '',
     file_name           : firstMatch { looksFile(it) },
     file_type           : firstMatch { isType(it) },
@@ -79,17 +73,19 @@ def guessFromList = { List row ->
   ]
 }
 
+
 /*
 ================================================================================
  PROCESS: synapse_get
+ - Non-interactive token login (no prompts)
+ - Network probe & 30-min timeout on download
+ - Clear DONE marker + hard check at least one file was fetched
+ - Emits: tuple val(meta), path('*')
 ================================================================================
 */
-
 process synapse_get {
 
-    // Keep your existing image
     container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
-
     tag "${ eidOf(meta) }"
 
     input:
@@ -101,31 +97,30 @@ process synapse_get {
     tuple val(meta), path('*')
 
     script:
-    def args = (task.ext.args ?: '').toString()   // e.g. "-r" if you ever want folders
+    def args = (task.ext.args ?: '').toString()   // e.g. "-r" for folders if needed
     def eid  = eidOf(meta)
     """
     #!/usr/bin/env bash
     set -euxo pipefail
 
-    # --- Environment hardening to avoid hidden prompts/hangs ---
+    # Harden env to avoid hidden prompts/hangs
     export PYTHONUNBUFFERED=1
     export PYTHONIOENCODING=UTF-8
-    export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring  # disable keyring usage
-    export HOME="\$PWD"                                           # ensure writable "home"
+    export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
+    export HOME="\$PWD"
     mkdir -p "\$HOME" || true
 
     echo "== synapse_get =="
     echo "Entity ID: ${eid}"
     synapse --version || true
 
-    # Secret present?
     if [ -z "\${SYNAPSE_AUTH_TOKEN:-}" ]; then
       echo "ERROR: SYNAPSE_AUTH_TOKEN is not set" >&2
       exit 1
     fi
     echo "Token length (masked): \${#SYNAPSE_AUTH_TOKEN}"
 
-    # Quick network probe (fails fast if egress/DNS is blocked)
+    # Quick egress probe
     set +e
     curl -fsSI --max-time 10 https://www.synapse.org >/dev/null
     curl_ok=\$?
@@ -135,12 +130,10 @@ process synapse_get {
       exit 1
     fi
 
-    # Non-interactive token login (NO rememberMe)
+    # Non-interactive login
     synapse login --silent --authToken "\$SYNAPSE_AUTH_TOKEN"
 
     echo "Downloading: synapse get ${args} ${eid} --downloadLocation ."
-    # Hard timeout so it cannot hang forever (30 min)
-    # Also capture verbose CLI logs for forensics
     timeout 1800 synapse --debug get ${args} ${eid} --downloadLocation . 2>&1 | tee synapse_debug.log
 
     echo "Listing after download:"
@@ -152,8 +145,17 @@ process synapse_get {
 
     echo "Final listing:"
     ls -lAh || true
+
+    # Require that at least one real file (exclude debug & nextflow files) exists
+    found=\$(find . -maxdepth 1 -type f ! -name "synapse_debug.log" ! -name ".command*" -printf '.' | wc -c)
+    if [ "\$found" -eq 0 ]; then
+      echo "ERROR: No files were downloaded for ${eid}" >&2
+      exit 2
+    fi
+
+    echo "__SYNAPSE_GET_DONE__ \$(date -Is)"
     """
-    
+
     stub:
     """
     echo "Stub: creating a fake file for testing..."
@@ -165,6 +167,11 @@ process synapse_get {
 /*
 ================================================================================
  PROCESS: make_metadata_tsv
+ - Builds CRDC-style TSV strictly from samplesheet values (no file probing)
+ - Picks one data file to pass downstream:
+     * Prefer basename matching meta.file_name (after space->underscore)
+     * Else first regular file in work dir (excluding logs/.command*)
+ - Emits: tuple val(meta), path("*_Metadata.tsv"), path("DATAFILE_SELECTED")
 ================================================================================
 */
 process make_metadata_tsv {
@@ -175,12 +182,11 @@ process make_metadata_tsv {
     tuple val(meta), path(downloaded_files)
 
     output:
-    tuple val(meta), path("${ eidOf(meta) }_Metadata.tsv"), path("DATAFILE_SELECTED")
+    tuple val(meta), path("*_Metadata.tsv"), path("DATAFILE_SELECTED")
 
     script:
-    def eid = eidOf(meta)
-
-    // Pull fields from Map if available
+    def eid               = eidOf(meta)
+    // Support dotted or flat keys from the samplesheet
     def study_phs         = getf(meta, ['study.phs_accession','study_phs_accession'], 'phs002371')
     def participant_id    = getf(meta, ['participant.study_participant_id','study_participant_id'], '')
     def sample_id         = getf(meta, ['sample.sample_id','sample_id','HTAN_Assayed_Biospecimen_ID'], '')
@@ -208,18 +214,17 @@ process make_metadata_tsv {
       checksum_algorithm = checksum_algorithm ?: g.checksum_algorithm
     }
 
-    // Prefer a staged file matching file_name (after space->underscore); else first file
     def desired = file_name?.replace(' ', '_') ?: ''
 
     """
     set -euo pipefail
 
-    # Choose a data file to pass on
+    # Choose a data file to pass on (exclude debug & nextflow files)
     SELECTED=""
     if [ -n "${desired}" ] && [ -f "${desired}" ]; then
       SELECTED="${desired}"
     else
-      mapfile -t FILES < <(find . -maxdepth 1 -type f -printf "%f\\n" | sort)
+      mapfile -t FILES < <(find . -maxdepth 1 -type f ! -name "synapse_debug.log" ! -name ".command*" -printf "%f\\n" | sort)
       if [ "\${#FILES[@]}" -gt 0 ]; then
         SELECTED="\${FILES[0]}"
       fi
@@ -230,20 +235,26 @@ process make_metadata_tsv {
       exit 1
     fi
 
-    # Write TSV strictly from samplesheet values (or best-effort guesses)
+    # Write TSV strictly from samplesheet values
     cat > ${eid}_Metadata.tsv <<'TSV'
 type	study.phs_accession	participant.study_participant_id	sample.sample_id	file_name	file_type	file_description	file_size	md5sum	experimental_strategy_and_data_subtypes	submission_version	checksum_value	checksum_algorithm	file_mapping_level	release_datetime	is_supplementary_file
 file	${study_phs}	${participant_id}	${sample_id}	${file_name}	${file_type}	${file_description}	${file_size}	${md5sum}	${strategy}	${submission_version}	${checksum_value}	${checksum_algorithm}	${file_mapping_level}	${release_datetime}	${is_supplementary}
 TSV
 
+    # Expose selected data file under a stable name for downstream binding
     ln -sf "\$SELECTED" DATAFILE_SELECTED
+
     ls -lh ${eid}_Metadata.tsv
     """
 }
 
+
 /*
 ================================================================================
  PROCESS: make_uploader_config
+ - Creates per-file uploader YAML referencing Tower secrets for auth
+ - Passes the selected data file through
+ - Emits: tuple val(meta), path(data_file), path("cli-config-*.yml")
 ================================================================================
 */
 process make_uploader_config {
@@ -254,7 +265,7 @@ process make_uploader_config {
     tuple val(meta), path(data_file), path(metadata_tsv)
 
     output:
-    tuple val(meta), path(data_file), path("cli-config-${ eidOf(meta) }.yml")
+    tuple val(meta), path(data_file), path("cli-config-*.yml")
 
     script:
     def data_format = (getf(meta, ['file_type'], '') ?: '').toString()
@@ -284,9 +295,14 @@ YAML
     """
 }
 
+
 /*
 ================================================================================
  PROCESS: crdc_upload
+ - Ensures CRDC uploader CLI is available (or installs it)
+ - Uses Tower secrets: CRDC_API_TOKEN, CRDC_SUBMISSION_ID
+ - Runs the upload with generated YAML
+ - Emits: tuple val(meta), path("upload.log")
 ================================================================================
 */
 process crdc_upload {
@@ -345,6 +361,7 @@ process crdc_upload {
     echo "Stub upload for ${eid}" | tee upload.log
     """
 }
+
 
 /*
 ================================================================================
