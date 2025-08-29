@@ -83,6 +83,7 @@ def guessFromList = { List row ->
  - Emits: tuple val(meta), path('*')
 ================================================================================
 */
+
 process synapse_get {
 
     container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
@@ -91,106 +92,39 @@ process synapse_get {
     input:
     val(meta)
 
-    secret 'SYNAPSE_AUTH_TOKEN'
-
+    // token input
+    secret 'SYNAPSE_AUTH_TOKEN_DYP'
     output:
     tuple val(meta), path('*')
 
     script:
-    // allow folder recursion via `-process.ext.args='-r'`
     def args = (task.ext.args ?: '').toString()
     def eid  = eidOf(meta)
-    // shorten / extend this as you like
-    def hardTimeoutSec = task.ext.timeout_sec ?: 600  // 10 min
-
     """
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -euxo pipefail
 
-    export PYTHONUNBUFFERED=1
-    export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
-    export HOME="\$PWD"                 # make synapse config/cache local
-    export SYNAPSE_CACHE_DIR="\$PWD/.synapseCache"
-    mkdir -p "\$SYNAPSE_CACHE_DIR"
+    # Prefer the new secret; fall back to the old name if needed
+    TOKEN="\${SYNAPSE_AUTH_TOKEN_DYP:-\${SYNAPSE_AUTH_TOKEN:-}}"
+    if [ -z "\$TOKEN" ]; then
+      echo "ERROR: Neither SYNAPSE_AUTH_TOKEN_DYP nor SYNAPSE_AUTH_TOKEN is set." >&2
+      exit 1
+    fi
 
     echo "== synapse_get =="
     echo "Entity ID: ${eid}"
-    synapse --version || true
+    echo "Token length (masked): \${#TOKEN}"
 
-    if [ -z "\${SYNAPSE_AUTH_TOKEN:-}" ]; then
-      echo "ERROR: SYNAPSE_AUTH_TOKEN is not set" >&2
-      exit 1
-    fi
-    echo "Token length (masked): \${#SYNAPSE_AUTH_TOKEN}"
+    # (Optional) quick egress probe
+    curl -fsSI --max-time 10 https://www.synapse.org >/dev/null || {
+      echo "ERROR: Network/egress check to synapse.org failed" >&2; exit 1; }
 
-    # Quick egress probe
-    if ! curl -fsSI --max-time 10 https://www.synapse.org >/dev/null; then
-      echo "ERROR: Network/egress check to synapse.org failed" >&2
-      exit 1
-    fi
+    # Non-interactive login with the chosen token
+    synapse login --silent --authToken "\$TOKEN"
 
-    # Non-interactive login
-    synapse login --silent --authToken "\$SYNAPSE_AUTH_TOKEN"
-
-    echo "Starting download (timeout: ${hardTimeoutSec}s): synapse get ${args} ${eid} --downloadLocation ."
-    # Run download in background and capture PID; also tee debug log
-    ( synapse --debug get ${args} ${eid} --downloadLocation . 2>&1 | tee synapse_debug.log ) &
-    DL_PID=\$!
-
-    start_ts=\$(date +%s)
-    last_bytes=-1
-    stagnant_cnt=0
-
-    # Heartbeat & progress loop
-    while kill -0 "\$DL_PID" 2>/dev/null; do
-      now=\$(date +%s)
-      elapsed=\$(( now - start_ts ))
-      # Sum sizes of any regular files in CWD (excluding our own logs) + cache dir
-      cwd_bytes=\$(find . -maxdepth 1 -type f ! -name "synapse_debug.log" ! -name ".command*" -printf "%s\\n" | awk '{s+=\$1} END{print s+0}')
-      cache_bytes=\$(find "\$SYNAPSE_CACHE_DIR" -type f -printf "%s\\n" 2>/dev/null | awk '{s+=\$1} END{print s+0}')
-      total_bytes=\$(( cwd_bytes + cache_bytes ))
-      echo "heartbeat elapsed=\${elapsed}s total_bytes=\${total_bytes} cwd=\${cwd_bytes} cache=\${cache_bytes} \$(date -Is)"
-
-      # detect no growth
-      if [ "\$total_bytes" -eq "\$last_bytes" ]; then
-        stagnant_cnt=\$(( stagnant_cnt + 1 ))
-      else
-        stagnant_cnt=0
-        last_bytes=\$total_bytes
-      fi
-
-      # Hard timeout
-      if [ "\$elapsed" -ge ${hardTimeoutSec} ]; then
-        echo "ERROR: Download exceeded ${hardTimeoutSec}s; killing synapse get" >&2
-        kill "\$DL_PID" 2>/dev/null || true
-        sleep 2
-        kill -9 "\$DL_PID" 2>/dev/null || true
-        exit 124
-      fi
-
-      sleep 15
-    done
-
-    wait "\$DL_PID" || { echo "ERROR: synapse get exited with non-zero status" >&2; exit 2; }
-
-    echo "Listing after download:"
-    ls -lAh || true
-
-    # Normalize filenames (spaces -> underscores)
-    shopt -s nullglob
-    for f in *\\ *; do mv "\${f}" "\${f// /_}"; done
-
-    echo "Final listing:"
-    ls -lAh || true
-
-    # Require that at least one real file (exclude logs/nextflow)
-    found=\$(find . -maxdepth 1 -type f ! -name "synapse_debug.log" ! -name ".command*" -printf '.' | wc -c)
-    if [ "\$found" -eq 0 ]; then
-      echo "ERROR: No files were downloaded for ${eid}" >&2
-      exit 3
-    fi
-
-    echo "__SYNAPSE_GET_DONE__ \$(date -Is)"
+    # If you’re still in stub mode, this will run instead of the real download:
+    echo "Stub: creating a fake file for testing..."
+    dd if=/dev/urandom of=small_file.tmp bs=1M count=1
     """
     
     stub:
@@ -199,6 +133,7 @@ process synapse_get {
     dd if=/dev/urandom of=small_file.tmp bs=1M count=1
     """
 }
+
 
 
 /*
