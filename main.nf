@@ -1,43 +1,46 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl = 2
 
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    PARAMETERS AND INPUTS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
-// --------------------- Resolve samplesheet path (do NOT reassign params.input) ---------------------
+// ---- Resolve samplesheet path WITHOUT reassigning params.input ----
 def _raw = params.input ?: 'samplesheet.csv'
 def _isUrl = (_raw ==~ /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//)
 def _abs   = file(_raw).isAbsolute()
-def _existsAbs = _abs && file(_raw).exists()
-
-// Preferred repo path
 def repoPath = file("${projectDir}/${_raw}")
 
-// Choose resolved_input by priority:
-// 1) URL       → use as-is
-// 2) absolute + exists → use absolute
-// 3) repoPath exists   → use ${projectDir}/<relative>
-// 4) else fall back to repoPath anyway (so Tower doesn’t try /<name>)
+// Priority: URL → absolute (if exists) → repo copy → repo fallback
 def resolved_input = _isUrl ? _raw
-                    : _existsAbs ? file(_raw).toString()
-                    : (repoPath.exists() ? repoPath.toString()
-                                          : repoPath.toString()) // final fallback
+                    : (_abs && file(_raw).exists()) ? file(_raw).toString()
+                    : (repoPath.exists() ? repoPath.toString() : repoPath.toString())
 
 log.info "projectDir          = ${projectDir}"
 log.info "params.input (raw)  = ${params.input ?: '(unset)'}"
 log.info "resolved_input      = ${resolved_input}"
 log.info "resolved exists?    = ${file(resolved_input).exists()}"
 
-// --------------------- Validate parameters & build channel ---------------------
+// Validate pipeline params & print summary
 validateParameters()
 log.info paramsSummaryLog(workflow)
 
+// Build channel of meta maps from samplesheet rows (validated by assets/schema_input.json)
 ch_input = Channel
   .fromList( samplesheetToList(resolved_input, "assets/schema_input.json") )
+
+// Helper: prefer entityId, fallback to entityid or entity_id
+def eidOf = { Map m -> m.entityId ?: m.entityid ?: m.entity_id }
+
 
 /*
 ================================================================================
  PROCESS: synapse_get
- - Downloads Synapse entity (meta.entityId) using SYNAPSE_AUTH_TOKEN (Tower secret)
+ - Downloads Synapse entity (eidOf(meta)) using SYNAPSE_AUTH_TOKEN (Tower secret)
  - Renames spaces in filenames to underscores
  - Emits: tuple val(meta), path('*')
 ================================================================================
@@ -47,7 +50,7 @@ process synapse_get {
     // TODO: Update to the latest tag when available
     container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
 
-    tag "${meta.entityId}"
+    tag "${ eidOf(meta) }"
 
     input:
     val(meta)
@@ -59,10 +62,11 @@ process synapse_get {
 
     script:
     def args = task.ext.args ?: ''
+    def eid  = eidOf(meta)
     """
     set -euo pipefail
-    echo "Fetching entity ${meta.entityId} from Synapse..."
-    synapse -p \$SYNAPSE_AUTH_TOKEN get $args ${meta.entityId}
+    echo "Fetching entity ${eid} from Synapse..."
+    synapse -p \$SYNAPSE_AUTH_TOKEN get $args ${eid}
 
     shopt -s nullglob
     for f in *\\ *; do mv "\${f}" "\${f// /_}"; done  # Replace spaces with underscores
@@ -75,6 +79,7 @@ process synapse_get {
     """
 }
 
+
 /*
 ================================================================================
  PROCESS: make_metadata_tsv
@@ -82,36 +87,37 @@ process synapse_get {
  - Picks one data file to pass downstream:
      * Prefer basename matching meta.file_name (after space->underscore)
      * Else first regular file in work dir
- - Emits: tuple val(meta), path("${meta.entityId}_Metadata.tsv"), path("DATAFILE_SELECTED")
+ - Emits: tuple val(meta), path("${eidOf(meta)}_Metadata.tsv"), path("DATAFILE_SELECTED")
 ================================================================================
 */
 process make_metadata_tsv {
 
-    tag "${meta.entityId}"
+    tag "${ eidOf(meta) }"
 
     input:
     tuple val(meta), path(downloaded_files)
 
     output:
-    tuple val(meta), path("${meta.entityId}_Metadata.tsv"), path("DATAFILE_SELECTED")
+    tuple val(meta), path("${ eidOf(meta) }_Metadata.tsv"), path("DATAFILE_SELECTED")
 
     script:
-    // Resolve values from samplesheet (fallbacks/defaults)
-    def study_phs             = meta.study_phs_accession ?: meta['study.phs_accession'] ?: 'phs002371'
-    def participant_id        = meta.study_participant_id ?: meta['participant.study_participant_id'] ?: ''
-    def sample_id             = meta.sample_id ?: meta['sample.sample_id'] ?: meta.HTAN_Assayed_Biospecimen_ID ?: ''
-    def file_name             = meta.file_name ?: ''
-    def file_type             = meta.file_type ?: ''
-    def file_description      = meta.file_description ?: ''
-    def file_size             = meta.file_size ?: ''
-    def md5sum                = meta.md5sum ?: ''
-    def strategy              = meta.experimental_strategy_and_data_subtypes ?: meta.experimental_strategy ?: ''
-    def submission_version    = meta.submission_version ?: ''
-    def checksum_value        = meta.checksum_value ?: ''
-    def checksum_algorithm    = meta.checksum_algorithm ?: 'md5'
-    def file_mapping_level    = meta.file_mapping_level ?: ''
-    def release_datetime      = meta.release_datetime ?: ''
-    def is_supplementary_file = meta.is_supplementary_file ?: ''
+    def eid               = eidOf(meta)
+    // Support dotted or flat keys from the samplesheet
+    def study_phs         = meta['study.phs_accession'] ?: meta.study_phs_accession ?: 'phs002371'
+    def participant_id    = meta['participant.study_participant_id'] ?: meta.study_participant_id ?: ''
+    def sample_id         = meta['sample.sample_id'] ?: meta.sample_id ?: meta.HTAN_Assayed_Biospecimen_ID ?: ''
+    def file_name         = meta.file_name ?: ''
+    def file_type         = meta.file_type ?: ''
+    def file_description  = meta.file_description ?: ''
+    def file_size         = meta.file_size ?: ''
+    def md5sum            = meta.md5sum ?: ''
+    def strategy          = meta.experimental_strategy_and_data_subtypes ?: meta.experimental_strategy ?: ''
+    def submission_version= meta.submission_version ?: ''
+    def checksum_value    = meta.checksum_value ?: ''
+    def checksum_algorithm= meta.checksum_algorithm ?: 'md5'
+    def file_mapping_level= meta.file_mapping_level ?: ''
+    def release_datetime  = meta.release_datetime ?: ''
+    def is_supplementary  = meta.is_supplementary_file ?: ''
 
     def desired = file_name?.replace(' ', '_') ?: ''
 
@@ -130,50 +136,52 @@ process make_metadata_tsv {
     fi
 
     if [ -z "\$SELECTED" ] || [ ! -f "\$SELECTED" ]; then
-      echo "ERROR: No data file found for ${meta.entityId}" >&2
+      echo "ERROR: No data file found for ${eid}" >&2
       exit 1
     fi
 
     # Write TSV strictly from samplesheet values
-    cat > ${meta.entityId}_Metadata.tsv <<'TSV'
+    cat > ${eid}_Metadata.tsv <<'TSV'
 type	study.phs_accession	participant.study_participant_id	sample.sample_id	file_name	file_type	file_description	file_size	md5sum	experimental_strategy_and_data_subtypes	submission_version	checksum_value	checksum_algorithm	file_mapping_level	release_datetime	is_supplementary_file
-file	${study_phs}	${participant_id}	${sample_id}	${file_name}	${file_type}	${file_description}	${file_size}	${md5sum}	${strategy}	${submission_version}	${checksum_value}	${checksum_algorithm}	${file_mapping_level}	${release_datetime}	${is_supplementary_file}
+file	${study_phs}	${participant_id}	${sample_id}	${file_name}	${file_type}	${file_description}	${file_size}	${md5sum}	${strategy}	${submission_version}	${checksum_value}	${checksum_algorithm}	${file_mapping_level}	${release_datetime}	${is_supplementary}
 TSV
 
     # Expose selected data file under a stable name for downstream binding
     ln -sf "\$SELECTED" DATAFILE_SELECTED
 
-    ls -lh ${meta.entityId}_Metadata.tsv
+    ls -lh ${eid}_Metadata.tsv
     """
 }
+
 
 /*
 ================================================================================
  PROCESS: make_uploader_config
  - Creates per-file uploader YAML referencing Tower secrets for auth
  - Passes the selected data file through
- - Emits: tuple val(meta), path(data_file), path("cli-config-${meta.entityId}.yml")
+ - Emits: tuple val(meta), path(data_file), path("cli-config-${eidOf(meta)}.yml")
 ================================================================================
 */
 process make_uploader_config {
 
-    tag "${meta.entityId}"
+    tag "${ eidOf(meta) }"
 
     input:
     tuple val(meta), path(data_file), path(metadata_tsv)
 
     output:
-    tuple val(meta), path(data_file), path("cli-config-${meta.entityId}.yml")
+    tuple val(meta), path(data_file), path("cli-config-${ eidOf(meta) }.yml")
 
     script:
     def data_format = (meta.file_type ?: '').toString()
     def overwrite   = params.overwrite as boolean
     def dry_run     = params.dry_run as boolean
+    def eid         = eidOf(meta)
 
     """
     set -euo pipefail
 
-    cat > cli-config-${meta.entityId}.yml <<'YAML'
+    cat > cli-config-${eid}.yml <<'YAML'
 version: 1
 submission:
   id: ${'$'}{CRDC_SUBMISSION_ID}
@@ -188,9 +196,10 @@ files:
     dry_run: ${dry_run}
 YAML
 
-    echo "Wrote cli-config-${meta.entityId}.yml"
+    echo "Wrote cli-config-${eid}.yml"
     """
 }
+
 
 /*
 ================================================================================
@@ -209,7 +218,7 @@ process crdc_upload {
     // Option B: install on the fly (works; slower)
     container 'python:3.11-slim'
 
-    tag "${meta.entityId}"
+    tag "${ eidOf(meta) }"
 
     input:
     tuple val(meta), path(data_file), path(config_yml)
@@ -222,7 +231,7 @@ process crdc_upload {
 
     script:
     def uploader = (task.ext.uploader_cmd ?: 'crdc-uploader').toString()
-
+    def eid      = eidOf(meta)
     """
     set -euo pipefail
 
@@ -254,9 +263,10 @@ process crdc_upload {
 
     stub:
     """
-    echo "Stub upload for ${meta.entityId}" | tee upload.log
+    echo "Stub upload for ${eid}" | tee upload.log
     """
 }
+
 
 /*
 ================================================================================
@@ -270,7 +280,8 @@ workflow {
   ch_up   = ch_cfg            | crdc_upload
 
   // Visibility
-  ch_meta.view { meta, tsv, datafile -> "METADATA:\t${meta.entityId}\t${tsv}" }
-  ch_cfg.view  { meta, yml -> "CONFIG:\t${meta.entityId}\t${yml}" }
-  ch_up.view   { meta, log -> "UPLOAD:\t${meta.entityId}\t${log}" }
+  ch_meta.view { meta, tsv, datafile -> "METADATA:\t${eidOf(meta)}\t${tsv}" }
+  ch_cfg.view  { meta, yml -> "CONFIG:\t${eidOf(meta)}\t${yml}" }
+  ch_up.view   { meta, log -> "UPLOAD:\t${eidOf(meta)}\t${log}" }
 }
+
