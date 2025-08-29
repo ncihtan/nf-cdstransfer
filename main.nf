@@ -120,13 +120,91 @@ TSV
     """
 }
 
+/*
+ * Create a CRDC uploader config YAML strictly from samplesheet (meta)
+ * and the produced metadata TSV, plus the staged data file path from synapse_get.
+ *
+ * Expects these in meta (canonical keys from nf-schema normalization):
+ *   - entityId            (required)
+ *   - file_name           (required)
+ *   - file_type           (optional; used as data_format)
+ *   - study_phs_accession (optional; defaults in TSV step)
+ *   - sample_id, study_participant_id, ... (optional; for TSV only)
+ *
+ * Uses Tower secrets at runtime (do NOT hardcode):
+ *   - CRDC_API_TOKEN      (set in Tower; used later by uploader step)
+ *   - CRDC_SUBMISSION_ID  (set in Tower)
+ */
+process make_uploader_config {
+
+    tag "${meta.entityId}"
+
+    // If you prefer, pin a tiny python image; bash heredoc is fine here
+    // container 'python:3.11-slim'
+
+    input:
+    tuple val(meta), path(data_file), path(metadata_tsv)
+
+    output:
+    tuple val(meta), path("cli-config-${meta.entityId}.yml")
+
+    /*
+      The YAML is intentionally simple and conservative, modeled after typical
+      crdc-datahub-cli-uploader per-file configs.
+
+      Fields:
+        version: config format version (yours may omit—kept for clarity)
+        submission:
+          id: taken from env CRDC_SUBMISSION_ID (Tower secret)
+        auth:
+          token_env: name of env var holding token (CRDC_API_TOKEN)
+        files:
+          - data_file: staged file path from synapse_get
+            metadata_file: path to generated TSV
+            data_format: (from meta.file_type if provided)
+            overwrite: true   (safely toggle via params if needed)
+            dry_run: false     (hooked to params.dry_run below if desired)
+     */
+
+    script:
+    def data_format = (meta.file_type ?: '').toString()
+    def overwrite   = params.overwrite ?: true
+    def dry_run     = params.dry_run ?: false
+
+    """
+    set -euo pipefail
+
+    cat > cli-config-${meta.entityId}.yml <<'YAML'
+version: 1
+submission:
+  id: ${'$'}{CRDC_SUBMISSION_ID}
+auth:
+  token_env: CRDC_API_TOKEN
+
+files:
+  - data_file: "${data_file}"
+    metadata_file: "${metadata_tsv}"
+    ${ data_format ? "data_format: \"${data_format}\"" : "" }
+    overwrite: ${overwrite}
+    dry_run: ${dry_run}
+YAML
+
+    echo "Wrote cli-config-${meta.entityId}.yml"
+    """
+}
+
+
+
 
 workflow {
   // ch_input yields val(meta)
-  ch_input \
-    | synapse_get \
-    | map { meta, _ -> meta } \
-    | make_metadata_tsv \
-    | view { meta, tsv -> "METADATA:\t${meta.entityid}\t${tsv}" }
+
+  ch_dl   = ch_input | synapse_get
+  ch_meta = ch_dl    | make_metadata_tsv
+  ch_cfg  = ch_meta  | make_uploader_config
+
+  // For debugging/logging
+  ch_meta.view { meta, tsv, datafile -> "METADATA:\t${meta.entityId}\t${tsv}" }
+  ch_cfg.view  { meta, yml -> "CONFIG:\t${meta.entityId}\t${yml}" }
 }
 
