@@ -30,33 +30,48 @@ log.info paramsSummaryLog(workflow)
 ch_input = Channel.fromList( samplesheetToList(RESOLVED_INPUT, "assets/schema_input.json") )
 
 /* =============================================================================
-   SMALL HELPERS (closures)
+   HELPERS (robust, header-insensitive)
    ========================================================================== */
-eidOf = { meta ->
-  if (meta instanceof Map) {
-    return meta.entityId ?: meta.entityid ?: meta.entity_id ?: 'unknown_syn'
-  }
-  if (meta instanceof List) {
-    def m = meta.find { it instanceof CharSequence && ( it ==~ /syn\d+/ ) }
-    return m ?: 'unknown_syn'
-  }
-  'unknown_syn'
-}
+// Normalize a key for lookups: lower-case, spaces/dots/hyphens -> underscore
+normKey = { k -> k.toString().toLowerCase().replaceAll(/[\\s.\\-]/, '_') }
 
-getf = { meta, keys, defval = '' ->
+// Case/format-insensitive getter: tries several candidate keys
+getcx = { meta, List candidates, defval = '' ->
   if (!(meta instanceof Map)) return defval
-  for (k in keys) {
-    if (meta.containsKey(k) && meta[k] != null) {
-      def v = meta[k].toString().trim()
-      if (v) return v
+  def idx = [:]
+  meta.keySet().each { k ->
+    idx[k.toString()]                = k
+    idx[k.toString().toLowerCase()]  = k
+    idx[normKey(k)]                  = k
+  }
+  for (c in candidates) {
+    def probes = [ c.toString(), c.toString().toLowerCase(), normKey(c) ]
+    for (p in probes) {
+      if (idx.containsKey(p)) {
+        def v = meta[idx[p]]
+        if (v != null && v.toString().trim()) return v.toString()
+      }
     }
   }
   return defval
 }
 
+// Preferred Synapse id from common header variants or list row
+eidOf = { meta ->
+  if (meta instanceof Map) {
+    return getcx(meta, ['entityid','entity_id','entityId'], 'unknown_syn')
+  }
+  if (meta instanceof List) {
+    def m = meta.find { it instanceof CharSequence && (it ==~ /syn\\d+/) }
+    return m ?: 'unknown_syn'
+  }
+  'unknown_syn'
+}
+
 /* =============================================================================
    PROCESS: synapse_get  (DUMMY GENERATOR)
-   - Creates file named like meta.file_name (or <entity>.tmp), size = meta.file_size bytes (default 1 MiB)
+   - Creates a file named exactly like samplesheet file_name (spaces -> underscores),
+     and of size file_size (bytes; default 1 MiB).
    - Emits: tuple val(meta), path('*')
    ========================================================================== */
 process synapse_get {
@@ -71,16 +86,22 @@ process synapse_get {
   tuple val(meta), path('*')
 
   script:
-  // Precompute safe file name & size in Groovy to avoid bash subshells/regex
-  def eid        = eidOf(meta)
-  def rawName    = (getf(meta, ['file_name'], "${eid}.tmp") as String)
-  def safeName   = new File(rawName).getName().replaceAll(/[^A-Za-z0-9._-]/, '_')
-  def rawSizeStr = (getf(meta, ['file_size'], '') as String).replaceAll(/[ ,]/,'')
-  def size       = (rawSizeStr ==~ /^\d+$/) ? rawSizeStr : '1048576'  // 1 MiB default
+  // Resolve fields in Groovy (no bash regex/subshells)
+  def eid         = eidOf(meta)
+  def rawName     = getcx(meta, ['file_name','filename','file.name','file name'], "${eid}.tmp")
+  def safeName    = new File(rawName).getName().replace(' ', '_')   // preserve extension; only spaces->_
+  def rawSizeStr  = getcx(meta, ['file_size','filesize','file.size','size','file size'], '').replaceAll(/[ ,]/,'')
+  def size        = (rawSizeStr ==~ /^\\d+$/) ? rawSizeStr : '1048576'  // 1 MiB default
+  def metaKeys    = (meta instanceof Map) ? meta.keySet().join(', ') : meta.toString()
 
   """
   #!/usr/bin/env bash
   set -euo pipefail
+
+  echo "META_KEYS: ${metaKeys}"
+  echo "RESOLVED entity: ${eid}"
+  echo "RESOLVED file_name -> ${rawName}"
+  echo "RESOLVED file_size -> ${size}"
 
   echo "Creating dummy file: ${safeName} (${size} bytes)"
   truncate -s ${size} "${safeName}" || dd if=/dev/zero of="${safeName}" bs=1 count=${size} >/dev/null 2>&1 || true
@@ -93,7 +114,7 @@ process synapse_get {
 /* =============================================================================
    PROCESS: make_metadata_tsv
    - TSV from samplesheet values only (no probing)
-   - Picks data file (prefer file_name match; else first regular file)
+   - Picks data file (prefer exact file_name rule from above; else first regular file)
    - Emits: tuple val(meta), path("DATAFILE_SELECTED"), path("<eid>_Metadata.tsv")
    ========================================================================== */
 process make_metadata_tsv {
@@ -107,25 +128,26 @@ process make_metadata_tsv {
   tuple val(meta), path("DATAFILE_SELECTED"), path("*_Metadata.tsv")
 
   script:
+  // Resolve all fields using getcx to be robust to header variants
   def eid               = eidOf(meta)
-  def study_phs         = getf(meta, ['study.phs_accession','study_phs_accession'], 'phs002371')
-  def participant_id    = getf(meta, ['participant.study_participant_id','study_participant_id'], '')
-  def sample_id         = getf(meta, ['sample.sample_id','sample_id','HTAN_Assayed_Biospecimen_ID'], '')
-  def file_name         = getf(meta, ['file_name'], '')
-  def file_type         = getf(meta, ['file_type'], '')
-  def file_description  = getf(meta, ['file_description'], '')
-  def file_size         = getf(meta, ['file_size'], '')
-  def md5sum            = getf(meta, ['md5sum','MD5','checksum_md5'], '')
-  def strategy          = getf(meta, ['experimental_strategy_and_data_subtypes','experimental_strategy'], '')
-  def submission_version= getf(meta, ['submission_version'], '')
-  def checksum_value    = getf(meta, ['checksum_value'], '')
-  def checksum_algorithm= getf(meta, ['checksum_algorithm'], 'md5')
-  def file_mapping_level= getf(meta, ['file_mapping_level'], '')
-  def release_datetime  = getf(meta, ['release_datetime'], '')
-  def is_supplementary  = getf(meta, ['is_supplementary_file'], '')
+  def study_phs         = getcx(meta, ['study.phs_accession','study_phs_accession'], 'phs002371')
+  def participant_id    = getcx(meta, ['participant.study_participant_id','study_participant_id'], '')
+  def sample_id         = getcx(meta, ['sample.sample_id','sample_id','HTAN_Assayed_Biospecimen_ID'], '')
+  def file_name         = getcx(meta, ['file_name','filename','file.name','file name'], '')
+  def file_type         = getcx(meta, ['file_type'], '')
+  def file_description  = getcx(meta, ['file_description'], '')
+  def file_size         = getcx(meta, ['file_size','filesize','file.size','size','file size'], '')
+  def md5sum            = getcx(meta, ['md5sum','MD5','checksum_md5'], '')
+  def strategy          = getcx(meta, ['experimental_strategy_and_data_subtypes','experimental_strategy'], '')
+  def submission_version= getcx(meta, ['submission_version'], '')
+  def checksum_value    = getcx(meta, ['checksum_value'], '')
+  def checksum_algorithm= getcx(meta, ['checksum_algorithm'], 'md5')
+  def file_mapping_level= getcx(meta, ['file_mapping_level'], '')
+  def release_datetime  = getcx(meta, ['release_datetime'], '')
+  def is_supplementary  = getcx(meta, ['is_supplementary_file'], '')
 
-  // Desired name (sanitized) to prefer when selecting the file
-  def desiredSafe = (file_name ?: '').toString().replaceAll(/[^A-Za-z0-9._-]/, '_')
+  // Match the same naming rule used in synapse_get (spaces -> underscores)
+  def desiredSafe = (file_name ?: '').replace(' ', '_')
 
   """
   #!/usr/bin/env bash
@@ -176,7 +198,7 @@ process make_uploader_config {
 
   script:
   def eid         = eidOf(meta)
-  def data_format = (getf(meta, ['file_type'], '') ?: '').toString()
+  def data_format = getcx(meta, ['file_type'], '')
   def overwrite   = (params.overwrite != null ? params.overwrite : true)
   def dry_run     = (params.dry_run  != null ? params.dry_run  : false)
   def dataFormatLine = data_format ? "    data_format: \\\"${data_format}\\\"\\n" : ""
