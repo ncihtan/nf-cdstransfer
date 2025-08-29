@@ -29,25 +29,63 @@ log.info "resolved exists?    = ${file(resolved_input).exists()}"
 validateParameters()
 log.info paramsSummaryLog(workflow)
 
-// Build channel of meta maps from samplesheet rows (validated by assets/schema_input.json)
-ch_input = Channel
-  .fromList( samplesheetToList(resolved_input, "assets/schema_input.json") )
+// Build channel of meta rows from samplesheet (can be Map *or* List depending on schema)
+ch_input = Channel.fromList( samplesheetToList(resolved_input, "assets/schema_input.json") )
 
-// Helper: prefer entityId, fallback to entityid or entity_id
-def eidOf = { Map m -> m.entityId ?: m.entityid ?: m.entity_id }
+// ---------- Helpers ----------
 
+// Prefer entityId/entityid/entity_id if Map; if List, pick first value matching syn\d+
+def eidOf = { m ->
+  if (m instanceof Map) {
+    return m.entityId ?: m.entityid ?: m.entity_id
+  }
+  if (m instanceof List) {
+    def hit = m.find { it instanceof CharSequence && (it ==~ /syn\d+/) }
+    return hit ?: 'unknown_syn'
+  }
+  return 'unknown_syn'
+}
+
+// Get first existing field from a Map using a list of candidate keys
+def getf = { m, List<String> keys, def defval = '' ->
+  (m instanceof Map) ? (keys.findResult { k -> m.containsKey(k) && m[k] != null && m[k].toString().trim() ? m[k] : null } ?: defval) : defval
+}
+
+// When meta is a List, heuristically guess fields
+def guessFromList = { List row ->
+  // helpers
+  def firstMatch = { Closure<Boolean> pred -> row.find { it instanceof CharSequence && pred(it as CharSequence) } ?: '' }
+  def isMd5      = { CharSequence s -> s ==~ /(?i)^[a-f0-9]{32}$/ }
+  def isNumber   = { CharSequence s -> s ==~ /^\d+$/ }
+  def isType     = { CharSequence s -> s in ['BAM','FASTQ','TSV','CSV','CRAM','VCF','TXT'] }
+  def looksFile  = { CharSequence s -> s ==~ /.+\.(bam|bai|cram|crai|fastq(\.gz)?|fq(\.gz)?|vcf(\.gz)?|tsv|csv|txt)$/ }
+
+  [
+    study_phs_accession : firstMatch { it ==~ /^phs\d{6,}$/ },
+    participant_id      : '',  // not reliable to guess from free list
+    sample_id           : '',
+    file_name           : firstMatch { looksFile(it) },
+    file_type           : firstMatch { isType(it) },
+    file_description    : '',
+    file_size           : firstMatch { isNumber(it) },
+    md5sum              : firstMatch { isMd5(it) },
+    strategy            : '',
+    submission_version  : '',
+    checksum_value      : '',
+    checksum_algorithm  : 'md5',
+    file_mapping_level  : '',
+    release_datetime    : '',
+    is_supplementary    : ''
+  ]
+}
 
 /*
 ================================================================================
  PROCESS: synapse_get
- - Downloads Synapse entity (eidOf(meta)) using SYNAPSE_AUTH_TOKEN (Tower secret)
- - Renames spaces in filenames to underscores
- - Emits: tuple val(meta), path('*')
 ================================================================================
 */
 process synapse_get {
 
-    // TODO: Update to the latest tag when available
     container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
 
     tag "${ eidOf(meta) }"
@@ -79,15 +117,9 @@ process synapse_get {
     """
 }
 
-
 /*
 ================================================================================
  PROCESS: make_metadata_tsv
- - Builds CRDC-style TSV strictly from samplesheet values (no file probing)
- - Picks one data file to pass downstream:
-     * Prefer basename matching meta.file_name (after space->underscore)
-     * Else first regular file in work dir
- - Emits: tuple val(meta), path("${eidOf(meta)}_Metadata.tsv"), path("DATAFILE_SELECTED")
 ================================================================================
 */
 process make_metadata_tsv {
@@ -101,24 +133,37 @@ process make_metadata_tsv {
     tuple val(meta), path("${ eidOf(meta) }_Metadata.tsv"), path("DATAFILE_SELECTED")
 
     script:
-    def eid               = eidOf(meta)
-    // Support dotted or flat keys from the samplesheet
-    def study_phs         = meta['study.phs_accession'] ?: meta.study_phs_accession ?: 'phs002371'
-    def participant_id    = meta['participant.study_participant_id'] ?: meta.study_participant_id ?: ''
-    def sample_id         = meta['sample.sample_id'] ?: meta.sample_id ?: meta.HTAN_Assayed_Biospecimen_ID ?: ''
-    def file_name         = meta.file_name ?: ''
-    def file_type         = meta.file_type ?: ''
-    def file_description  = meta.file_description ?: ''
-    def file_size         = meta.file_size ?: ''
-    def md5sum            = meta.md5sum ?: ''
-    def strategy          = meta.experimental_strategy_and_data_subtypes ?: meta.experimental_strategy ?: ''
-    def submission_version= meta.submission_version ?: ''
-    def checksum_value    = meta.checksum_value ?: ''
-    def checksum_algorithm= meta.checksum_algorithm ?: 'md5'
-    def file_mapping_level= meta.file_mapping_level ?: ''
-    def release_datetime  = meta.release_datetime ?: ''
-    def is_supplementary  = meta.is_supplementary_file ?: ''
+    def eid = eidOf(meta)
 
+    // Pull fields from Map if available
+    def study_phs         = getf(meta, ['study.phs_accession','study_phs_accession'], 'phs002371')
+    def participant_id    = getf(meta, ['participant.study_participant_id','study_participant_id'], '')
+    def sample_id         = getf(meta, ['sample.sample_id','sample_id','HTAN_Assayed_Biospecimen_ID'], '')
+    def file_name         = getf(meta, ['file_name'], '')
+    def file_type         = getf(meta, ['file_type'], '')
+    def file_description  = getf(meta, ['file_description'], '')
+    def file_size         = getf(meta, ['file_size'], '')
+    def md5sum            = getf(meta, ['md5sum','MD5','checksum_md5'], '')
+    def strategy          = getf(meta, ['experimental_strategy_and_data_subtypes','experimental_strategy'], '')
+    def submission_version= getf(meta, ['submission_version'], '')
+    def checksum_value    = getf(meta, ['checksum_value'], '')
+    def checksum_algorithm= getf(meta, ['checksum_algorithm'], 'md5')
+    def file_mapping_level= getf(meta, ['file_mapping_level'], '')
+    def release_datetime  = getf(meta, ['release_datetime'], '')
+    def is_supplementary  = getf(meta, ['is_supplementary_file'], '')
+
+    // If meta is a List, try a best-effort guess to avoid blanks
+    if (!(meta instanceof Map) && (meta instanceof List)) {
+      def g = guessFromList(meta as List)
+      study_phs          = study_phs          ?: g.study_phs_accession
+      file_name          = file_name          ?: g.file_name
+      file_type          = file_type          ?: g.file_type
+      file_size          = file_size          ?: g.file_size
+      md5sum             = md5sum             ?: g.md5sum
+      checksum_algorithm = checksum_algorithm ?: g.checksum_algorithm
+    }
+
+    // Prefer a staged file matching file_name (after space->underscore); else first file
     def desired = file_name?.replace(' ', '_') ?: ''
 
     """
@@ -140,26 +185,20 @@ process make_metadata_tsv {
       exit 1
     fi
 
-    # Write TSV strictly from samplesheet values
+    # Write TSV strictly from samplesheet values (or best-effort guesses)
     cat > ${eid}_Metadata.tsv <<'TSV'
 type	study.phs_accession	participant.study_participant_id	sample.sample_id	file_name	file_type	file_description	file_size	md5sum	experimental_strategy_and_data_subtypes	submission_version	checksum_value	checksum_algorithm	file_mapping_level	release_datetime	is_supplementary_file
 file	${study_phs}	${participant_id}	${sample_id}	${file_name}	${file_type}	${file_description}	${file_size}	${md5sum}	${strategy}	${submission_version}	${checksum_value}	${checksum_algorithm}	${file_mapping_level}	${release_datetime}	${is_supplementary}
 TSV
 
-    # Expose selected data file under a stable name for downstream binding
     ln -sf "\$SELECTED" DATAFILE_SELECTED
-
     ls -lh ${eid}_Metadata.tsv
     """
 }
 
-
 /*
 ================================================================================
  PROCESS: make_uploader_config
- - Creates per-file uploader YAML referencing Tower secrets for auth
- - Passes the selected data file through
- - Emits: tuple val(meta), path(data_file), path("cli-config-${eidOf(meta)}.yml")
 ================================================================================
 */
 process make_uploader_config {
@@ -173,7 +212,7 @@ process make_uploader_config {
     tuple val(meta), path(data_file), path("cli-config-${ eidOf(meta) }.yml")
 
     script:
-    def data_format = (meta.file_type ?: '').toString()
+    def data_format = (getf(meta, ['file_type'], '') ?: '').toString()
     def overwrite   = params.overwrite as boolean
     def dry_run     = params.dry_run as boolean
     def eid         = eidOf(meta)
@@ -200,14 +239,9 @@ YAML
     """
 }
 
-
 /*
 ================================================================================
  PROCESS: crdc_upload
- - Ensures CRDC uploader CLI is available (or installs it)
- - Uses Tower secrets: CRDC_API_TOKEN, CRDC_SUBMISSION_ID
- - Runs the upload with generated YAML
- - Emits: tuple val(meta), path("upload.log")
 ================================================================================
 */
 process crdc_upload {
@@ -267,7 +301,6 @@ process crdc_upload {
     """
 }
 
-
 /*
 ================================================================================
  WORKFLOW
@@ -284,4 +317,3 @@ workflow {
   ch_cfg.view  { meta, yml -> "CONFIG:\t${eidOf(meta)}\t${yml}" }
   ch_up.view   { meta, log -> "UPLOAD:\t${eidOf(meta)}\t${log}" }
 }
-
