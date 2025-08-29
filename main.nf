@@ -86,6 +86,7 @@ def guessFromList = { List row ->
 */
 process synapse_get {
 
+    // Synapse CLI image
     container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
 
     tag "${ eidOf(meta) }"
@@ -93,26 +94,47 @@ process synapse_get {
     input:
     val(meta)
 
+    // Comes from Tower secret; do NOT hardcode
     secret 'SYNAPSE_AUTH_TOKEN'
 
     output:
     tuple val(meta), path('*')
 
     script:
-    def args = task.ext.args ?: ''
+    def args = (task.ext.args ?: '').toString()   // e.g. "-r" if you ever fetch folders
     def eid  = eidOf(meta)
     """
     set -euo pipefail
-    echo "Fetching entity ${eid} from Synapse..."
-    synapse -p \$SYNAPSE_AUTH_TOKEN get $args ${eid}
 
+    # More verbose logging to avoid "silent hangs"
+    export PYTHONUNBUFFERED=1
+
+    echo "== synapse_get =="
+    echo "Entity ID: ${eid}"
+    synapse --version || true
+
+    if [ -z "\${SYNAPSE_AUTH_TOKEN:-}" ]; then
+      echo "ERROR: SYNAPSE_AUTH_TOKEN is not set" >&2
+      exit 1
+    fi
+
+    synapse login --silent --authToken "\$SYNAPSE_AUTH_TOKEN" --rememberMe
+
+    # Download to the current working dir (explicit for clarity)
+    echo "Downloading with: synapse get ${args} ${eid} --downloadLocation ."
+    synapse get ${args} ${eid} --downloadLocation .
+
+    # Normalize filenames (spaces -> underscores)
     shopt -s nullglob
-    for f in *\\ *; do mv "\${f}" "\${f// /_}"; done  # Replace spaces with underscores
+    for f in *\\ *; do mv "\${f}" "\${f// /_}"; done
+
+    echo "Downloaded files:"
+    ls -lAh || true
     """
 
     stub:
     """
-    echo "Making a fake file for testing..."
+    echo "Stub: creating a fake file for testing..."
     dd if=/dev/urandom of=small_file.tmp bs=1M count=1
     """
 }
