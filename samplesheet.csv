@@ -1,3 +1,4 @@
-entityId,file_name,study.phs_accession,sample.sample_id,file_type,file_size,md5sum,is_supplementary_file,experimental_strategy_and_data_subtypes
+entityid,file_name,study.phs_accession,sample.sample_id,file_type,file_size,md5sum,is_supplementary_file,experimental_strategy_and_data_subtypes
 syn51728854,A001C004.sorted.ir.br.rmDup.md.rn.bam,phs002371,HTA10_04_109,BAM,6744623496,2560e0d2ef04e4025b3faaa875837b36,FALSE,DNA-Seq
+
 syn51378172,A001C004.sorted.ir.br.rmDup.md.rn.bam.bai,phs002371,HTA10_05_210,BAM,4319520,b8f6a161337a6697cffb6cb256203b90,FALSE,DNA-Seq
