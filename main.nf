@@ -127,36 +127,17 @@ TSV
  *   - CRDC_API_TOKEN      (set in Tower; used later by uploader step)
  *   - CRDC_SUBMISSION_ID  (set in Tower)
  */
+
 process make_uploader_config {
 
     tag "${meta.entityId}"
-
-    // If you prefer, pin a tiny python image; bash heredoc is fine here
-    // container 'python:3.11-slim'
 
     input:
     tuple val(meta), path(data_file), path(metadata_tsv)
 
     output:
-    tuple val(meta), path("cli-config-${meta.entityId}.yml")
-
-    /*
-      The YAML is intentionally simple and conservative, modeled after typical
-      crdc-datahub-cli-uploader per-file configs.
-
-      Fields:
-        version: config format version (yours may omit—kept for clarity)
-        submission:
-          id: taken from env CRDC_SUBMISSION_ID (Tower secret)
-        auth:
-          token_env: name of env var holding token (CRDC_API_TOKEN)
-        files:
-          - data_file: staged file path from synapse_get
-            metadata_file: path to generated TSV
-            data_format: (from meta.file_type if provided)
-            overwrite: true   (safely toggle via params if needed)
-            dry_run: false     (hooked to params.dry_run below if desired)
-     */
+    // pass the data file through + emit the YAML
+    tuple val(meta), path(data_file), path("cli-config-${meta.entityId}.yml")
 
     script:
     def data_format = (meta.file_type ?: '').toString()
@@ -185,18 +166,87 @@ YAML
     """
 }
 
+process crdc_upload {
 
+    // Option A: use a prebuilt image that already includes the uploader
+    // container 'ghcr.io/<your-org>/crdc-datahub-cli-uploader:latest'
+
+    // Option B: install the uploader on the fly (works with vanilla Python image)
+    container 'python:3.11-slim'
+
+    tag "${meta.entityId}"
+
+    input:
+    tuple val(meta), path(data_file), path(config_yml)
+
+    secret 'CRDC_API_TOKEN'
+    secret 'CRDC_SUBMISSION_ID'
+
+    output:
+    tuple val(meta), path("upload.log")
+
+    script:
+    // Allow overriding the CLI name via `task.ext.uploader_cmd` (default 'crdc-uploader')
+    def uploader = (task.ext.uploader_cmd ?: 'crdc-uploader').toString()
+
+    """
+    set -euo pipefail
+
+    # Ensure basic tools
+    apt-get update -y >/dev/null 2>&1 || true
+    apt-get install -y --no-install-recommends git ca-certificates >/dev/null 2>&1 || true
+    python -m pip install --no-cache-dir --upgrade pip >/dev/null
+
+    # Try to use preinstalled CLI; if missing, install from GitHub
+    if ! command -v ${uploader} >/dev/null 2>&1; then
+      echo "CRDC uploader not found; installing..."
+      python -m pip install --no-cache-dir "git+https://github.com/CBIIT/crdc-datahub-cli-uploader.git" >/dev/null
+      # Common installed entrypoint names to try
+      for c in crdc-uploader crdc_datahub_uploader; do
+        if command -v "$c" >/dev/null 2>&1; then
+          uploader_cmd="$c"
+          break
+        fi
+      done
+      : "\${uploader_cmd:=crdc-uploader}"
+    else
+      uploader_cmd="${uploader}"
+    fi
+
+    # Sanity
+    echo "Using uploader: \${uploader_cmd}"
+    \${uploader_cmd} --help >/dev/null || true
+
+    # Run upload; YAML references the env vars, so just export them
+    export CRDC_API_TOKEN="\$CRDC_API_TOKEN"
+    export CRDC_SUBMISSION_ID="\$CRDC_SUBMISSION_ID"
+
+    set -x
+    \${uploader_cmd} upload --config "${config_yml}" 2>&1 | tee upload.log
+    set +x
+
+    # Basic success heuristic (adjust if your CLI prints a specific success token)
+    grep -E "Completed|Success|submitted" -i upload.log >/dev/null || true
+    """
+    
+    stub:
+    """
+    echo "Stub upload for ${meta.entityId}" | tee upload.log
+    """
+}
 
 
 workflow {
   // ch_input yields val(meta)
 
-  ch_dl   = ch_input | synapse_get
-  ch_meta = ch_dl    | make_metadata_tsv
-  ch_cfg  = ch_meta  | make_uploader_config
+  ch_dl   = ch_input          | synapse_get
+  ch_meta = ch_dl             | make_metadata_tsv
+  ch_cfg  = ch_meta           | make_uploader_config
+  ch_up   = ch_cfg            | crdc_upload
 
   // For debugging/logging
   ch_meta.view { meta, tsv, datafile -> "METADATA:\t${meta.entityId}\t${tsv}" }
   ch_cfg.view  { meta, yml -> "CONFIG:\t${meta.entityId}\t${yml}" }
+  ch_up.view   { meta, log -> "UPLOAD:\t${meta.entityId}\t${log}" }
 }
 
