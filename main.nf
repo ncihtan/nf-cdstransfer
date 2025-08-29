@@ -1,36 +1,38 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl = 2
 
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    PARAMETERS AND INPUTS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-
 include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
-// ---- Resolve samplesheet path WITHOUT reassigning params.input ----
-// Default filename if --input not provided
-def _rawInput = params.input ?: 'samplesheet.csv'
-// Is it a URL?
-def _isUrl    = _rawInput ==~ /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//
-// Is it absolute?
-def _isAbs    = file(_rawInput).isAbsolute()
-// If not URL and not absolute, make it projectDir-relative
-def resolved_input = (!_isUrl && !_isAbs) ? file("${projectDir}/${_rawInput}") : file(_rawInput)
+// --------------------- Resolve samplesheet path (do NOT reassign params.input) ---------------------
+def _raw = params.input ?: 'samplesheet.csv'
+def _isUrl = (_raw ==~ /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//)
+def _abs   = file(_raw).isAbsolute()
+def _existsAbs = _abs && file(_raw).exists()
 
-log.info "projectDir = ${projectDir}"
-log.info "Samplesheet (resolved) = ${resolved_input}"
+// Preferred repo path
+def repoPath = file("${projectDir}/${_raw}")
 
-// Validate input parameters
+// Choose resolved_input by priority:
+// 1) URL       → use as-is
+// 2) absolute + exists → use absolute
+// 3) repoPath exists   → use ${projectDir}/<relative>
+// 4) else fall back to repoPath anyway (so Tower doesn’t try /<name>)
+def resolved_input = _isUrl ? _raw
+                    : _existsAbs ? file(_raw).toString()
+                    : (repoPath.exists() ? repoPath.toString()
+                                          : repoPath.toString()) // final fallback
+
+log.info "projectDir          = ${projectDir}"
+log.info "params.input (raw)  = ${params.input ?: '(unset)'}"
+log.info "resolved_input      = ${resolved_input}"
+log.info "resolved exists?    = ${file(resolved_input).exists()}"
+
+// --------------------- Validate parameters & build channel ---------------------
 validateParameters()
-
-// Print summary of supplied parameters
 log.info paramsSummaryLog(workflow)
 
-// Build channel of meta maps from samplesheet
 ch_input = Channel
-    .fromList(samplesheetToList(resolved_input.toString(), "assets/schema_input.json"))
+  .fromList( samplesheetToList(resolved_input, "assets/schema_input.json") )
 
 /*
 ================================================================================
