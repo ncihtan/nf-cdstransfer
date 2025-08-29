@@ -86,53 +86,53 @@ def guessFromList = { List row ->
 
 process synapse_get {
 
-    container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
+    // Simple base image with coreutils (truncate, dd)
+    container 'python:3.11-slim'
+
     tag "${ eidOf(meta) }"
 
     input:
     val(meta)
 
-    // token input
-    secret 'SYNAPSE_AUTH_TOKEN_DYP'
     output:
+    // Emits the synthetic file into the work dir
     tuple val(meta), path('*')
 
     script:
-    def args = (task.ext.args ?: '').toString()
-    def eid  = eidOf(meta)
+    // Pull name/size from the row; fall back to sensible defaults
+    def eid   = eidOf(meta)
+    def fname = (meta.file_name ?: "${eid}.tmp").toString()
+    def fsize = (meta.file_size ?: '').toString()   // expected in bytes; may be blank
+
     """
     #!/usr/bin/env bash
-    set -euxo pipefail
+    set -euo pipefail
 
-    # Prefer the new secret; fall back to the old name if needed
-    TOKEN="\${SYNAPSE_AUTH_TOKEN_DYP:-\${SYNAPSE_AUTH_TOKEN:-}}"
-    if [ -z "\$TOKEN" ]; then
-      echo "ERROR: Neither SYNAPSE_AUTH_TOKEN_DYP nor SYNAPSE_AUTH_TOKEN is set." >&2
-      exit 1
+    RAW_NAME="${fname}"
+    # sanitize to a safe basename
+    SAFE_NAME="\$(basename "\$RAW_NAME" | tr -c 'A-Za-z0-9._-' '_' )"
+
+    RAW_SIZE="${fsize:-}"
+    # strip commas/spaces
+    RAW_SIZE="\${RAW_SIZE//,/}"
+    RAW_SIZE="\${RAW_SIZE// /}"
+
+    # default to 1 MiB if size is missing/non-numeric
+    if ! [[ "\$RAW_SIZE" =~ ^[0-9]+$ ]] || [ -z "\$RAW_SIZE" ]; then
+      RAW_SIZE=1048576
     fi
 
-    echo "== synapse_get =="
-    echo "Entity ID: ${eid}"
-    echo "Token length (masked): \${#TOKEN}"
+    echo "Creating dummy file for ${eid}: \${SAFE_NAME} (\${RAW_SIZE} bytes)"
 
-    # (Optional) quick egress probe
-    curl -fsSI --max-time 10 https://www.synapse.org >/dev/null || {
-      echo "ERROR: Network/egress check to synapse.org failed" >&2; exit 1; }
+    # Fast create the file at the requested size (sparse), then write 1 KiB random
+    # so it's not entirely zeroed on filesystems that support sparseness.
+    truncate -s "\$RAW_SIZE" "\$SAFE_NAME"
+    dd if=/dev/urandom of="\$SAFE_NAME" bs=1024 count=1 conv=notrunc >/dev/null 2>&1 || true
 
-    # Non-interactive login with the chosen token
-    synapse login --silent --authToken "\$TOKEN"
-
-    # If you’re still in stub mode, this will run instead of the real download:
-    echo "Stub: creating a fake file for testing..."
-    dd if=/dev/urandom of=small_file.tmp bs=1M count=1
-    """
-    
-    stub:
-    """
-    echo "Stub: creating a fake file for testing..."
-    dd if=/dev/urandom of=small_file.tmp bs=1M count=1
+    ls -lAh "\$SAFE_NAME"
     """
 }
+
 
 
 
