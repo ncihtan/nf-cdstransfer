@@ -2,106 +2,54 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.com/samplesheet.schema.json",
   "title": "Samplesheet Schema",
-  "description": "Schema for validating rows in samplesheet.csv.",
   "type": "array",
   "items": {
     "type": "object",
-    "required": ["entityId", "file_name"],
+    "required": ["entityid", "file_name"],
     "additionalProperties": true,
     "properties": {
-      "entityId": {
+      "entityid": {
         "type": "string",
         "pattern": "^syn\\d+$",
-        "description": "Synapse entity ID (e.g., syn123456).",
-        "meta": ["entityid", "entity_id"]
+        "description": "Synapse entity ID (e.g., syn123456)"
       },
-      "file_name": {
+      "entity_id": {
         "type": "string",
-        "minLength": 1,
-        "description": "Filename as it should appear in the metadata TSV.",
-        "meta": ["Filename", "name"]
+        "pattern": "^syn\\d+$",
+        "description": "Alternate header some sheets use"
       },
-      "file_type": {
-        "type": "string",
-        "description": "Logical file type (e.g., BAM, FASTQ, TSV).",
-        "meta": ["File_Type"]
-      },
-      "file_description": {
-        "type": "string",
-        "description": "Free-text description of the file.",
-        "meta": ["File_Description"]
-      },
+      "file_name": { "type": "string", "minLength": 1 },
+      "file_type": { "type": "string" },
+      "file_description": { "type": "string" },
       "file_size": {
-        "description": "File size in bytes (string or integer).",
         "oneOf": [
           { "type": "integer", "minimum": 0 },
           { "type": "string", "pattern": "^[0-9]+$" }
-        ],
-        "meta": ["File_Size"]
+        ]
       },
-      "md5sum": {
-        "type": "string",
-        "description": "MD5 checksum (32 hex).",
-        "pattern": "^[A-Fa-f0-9]{32}$",
-        "meta": ["MD5", "checksum_md5"]
-      },
-      "experimental_strategy_and_data_subtypes": {
-        "type": "string",
-        "description": "Experimental strategy / data subtype expected by CRDC.",
-        "meta": ["experimental_strategy", "Experimental_Strategy"]
-      },
-      "submission_version": {
-        "type": "string",
-        "description": "Submission version label/tag.",
-        "meta": ["Submission_Version"]
-      },
-      "checksum_value": {
-        "type": "string",
-        "description": "External checksum value (if not using md5).",
-        "meta": ["Checksum_Value"]
-      },
+      "md5sum": { "type": "string", "pattern": "^[A-Fa-f0-9]{32}$" },
+      "experimental_strategy_and_data_subtypes": { "type": "string" },
+      "submission_version": { "type": "string" },
+      "checksum_value": { "type": "string" },
       "checksum_algorithm": {
         "type": "string",
-        "description": "Checksum algorithm.",
         "enum": ["md5", "sha1", "sha256", "sha512", "none"],
-        "default": "md5",
-        "meta": ["Checksum_Algorithm"]
+        "default": "md5"
       },
-      "file_mapping_level": {
-        "type": "string",
-        "description": "Mapping level if applicable (e.g., Level1/Level2).",
-        "meta": ["File_Mapping_Level"]
-      },
+      "file_mapping_level": { "type": "string" },
       "release_datetime": {
         "type": "string",
-        "description": "ISO-8601 datetime (e.g., 2025-08-28T00:00:00Z).",
-        "pattern": "^\\d{4}-\\d{2}-\\d{2}([Tt ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
-        "meta": ["Release_Datetime"]
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}([Tt ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$"
       },
       "is_supplementary_file": {
-        "description": "Whether this is a supplementary file.",
         "oneOf": [
           { "type": "boolean" },
-          { "type": "string", "enum": ["true", "false", "TRUE", "FALSE", "yes", "no", "YES", "NO", "0", "1"] }
-        ],
-        "meta": ["Is_Supplementary_File"]
+          { "type": "string", "enum": ["true","false","TRUE","FALSE","yes","no","YES","NO","0","1"] }
+        ]
       },
-      "study_phs_accession": {
-        "type": "string",
-        "description": "e.g., phs002371",
-        "pattern": "^phs\\d{6,}$",
-        "meta": ["study.phs_accession", "phs_accession"]
-      },
-      "study_participant_id": {
-        "type": "string",
-        "description": "Participant study_participant_id (e.g., phs002371_HTA10_XXXX).",
-        "meta": ["participant.study_participant_id", "study_participant_id"]
-      },
-      "sample_id": {
-        "type": "string",
-        "description": "Sample ID (e.g., HTA10_04_109).",
-        "meta": ["sample.sample_id", "HTAN_Assayed_Biospecimen_ID"]
-      }
+      "study.phs_accession": { "type": "string", "pattern": "^phs\\d{6,}$" },
+      "sample.sample_id": { "type": "string" },
+      "participant.study_participant_id": { "type": "string" }
     }
   }
 }
