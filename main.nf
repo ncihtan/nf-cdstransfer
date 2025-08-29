@@ -71,29 +71,22 @@ process synapse_get {
   tuple val(meta), path('*')
 
   script:
-  def eid   = eidOf(meta)
-  def fname = (getf(meta, ['file_name'], "${eid}.tmp") as String)
-  def fsize = (getf(meta, ['file_size'], '') as String)
+  // Precompute safe file name & size in Groovy to avoid bash subshells/regex
+  def eid        = eidOf(meta)
+  def rawName    = (getf(meta, ['file_name'], "${eid}.tmp") as String)
+  def safeName   = new File(rawName).getName().replaceAll(/[^A-Za-z0-9._-]/, '_')
+  def rawSizeStr = (getf(meta, ['file_size'], '') as String).replaceAll(/[ ,]/,'')
+  def size       = (rawSizeStr ==~ /^\d+$/) ? rawSizeStr : '1048576'  // 1 MiB default
+
   """
   #!/usr/bin/env bash
   set -euo pipefail
 
-  RAW_NAME="!{fname}"
-  SAFE_NAME=$(basename "$RAW_NAME" | tr -c "A-Za-z0-9._-" "_" )
+  echo "Creating dummy file: ${safeName} (${size} bytes)"
+  truncate -s ${size} "${safeName}" || dd if=/dev/zero of="${safeName}" bs=1 count=${size} >/dev/null 2>&1 || true
+  dd if=/dev/urandom of="${safeName}" bs=1024 count=1 conv=notrunc >/dev/null 2>&1 || true
 
-  RAW_SIZE="!{fsize}"
-  RAW_SIZE=$(printf "%s" "$RAW_SIZE" | tr -d " ," )
-
-  # default to 1 MiB if missing or non-numeric
-  if ! printf "%s" "$RAW_SIZE" | grep -Eq "^[0-9]+$" || [ -z "$RAW_SIZE" ]; then
-    RAW_SIZE=1048576
-  fi
-
-  echo "Creating dummy file: $SAFE_NAME ($RAW_SIZE bytes)"
-  truncate -s "$RAW_SIZE" "$SAFE_NAME" || dd if=/dev/zero of="$SAFE_NAME" bs=1 count="$RAW_SIZE" >/dev/null 2>&1 || true
-  dd if=/dev/urandom of="$SAFE_NAME" bs=1024 count=1 conv=notrunc >/dev/null 2>&1 || true
-
-  ls -lAh "$SAFE_NAME"
+  ls -lAh "${safeName}"
   """
 }
 
@@ -130,32 +123,39 @@ process make_metadata_tsv {
   def file_mapping_level= getf(meta, ['file_mapping_level'], '')
   def release_datetime  = getf(meta, ['release_datetime'], '')
   def is_supplementary  = getf(meta, ['is_supplementary_file'], '')
-  def desired           = file_name?.replace(' ', '_') ?: ''
+
+  // Desired name (sanitized) to prefer when selecting the file
+  def desiredSafe = (file_name ?: '').toString().replaceAll(/[^A-Za-z0-9._-]/, '_')
+
   """
   #!/usr/bin/env bash
   set -euo pipefail
 
-  SELECTED=""
-  if [ -n "${desired}" ] && [ -f "${desired}" ]; then
-    SELECTED="${desired}"
-  else
-    mapfile -t FILES < <(find . -maxdepth 1 -type f ! -name ".command*" -printf "%f\n" | sort)
-    if [ "${#FILES[@]}" -gt 0 ]; then
-      SELECTED="${FILES[0]}"
-    fi
+  SELECTED="${desiredSafe}"
+  if [ -z "${desiredSafe}" ] || [ ! -f "${desiredSafe}" ]; then
+    SELECTED=""
+    for f in *; do
+      if [ -f "$f" ]; then
+        case "$f" in
+          .command*) ;;        # skip NF internals
+          *) SELECTED="$f"; break ;;
+        esac
+      fi
+    done
   fi
+
   if [ -z "$SELECTED" ] || [ ! -f "$SELECTED" ]; then
-    echo "ERROR: No data file found for !{eid}" >&2
+    echo "ERROR: No data file found for ${eid}" >&2
     exit 1
   fi
 
-  cat > !{eid}_Metadata.tsv <<_TSV_
-type	study.phs_accession	participant.study_participant_id	sample.sample_id	file_name	file_type	file_description	file_size	md5sum	experimental_strategy_and_data_subtypes	submission_version	checksum_value	checksum_algorithm	file_mapping_level	release_datetime	is_supplementary_file
-file	!{study_phs}	!{participant_id}	!{sample_id}	!{file_name}	!{file_type}	!{file_description}	!{file_size}	!{md5sum}	!{strategy}	!{submission_version}	!{checksum_value}	!{checksum_algorithm}	!{file_mapping_level}	!{release_datetime}	!{is_supplementary}
-_TSV_
+  cat > ${eid}_Metadata.tsv <<EOF
+type\tstudy.phs_accession\tparticipant.study_participant_id\tsample.sample_id\tfile_name\tfile_type\tfile_description\tfile_size\tmd5sum\texperimental_strategy_and_data_subtypes\tsubmission_version\tchecksum_value\tchecksum_algorithm\tfile_mapping_level\trelease_datetime\tis_supplementary_file
+file\t${study_phs}\t${participant_id}\t${sample_id}\t${file_name}\t${file_type}\t${file_description}\t${file_size}\t${md5sum}\t${strategy}\t${submission_version}\t${checksum_value}\t${checksum_algorithm}\t${file_mapping_level}\t${release_datetime}\t${is_supplementary}
+EOF
 
   ln -sf "$SELECTED" DATAFILE_SELECTED
-  ls -lh !{eid}_Metadata.tsv
+  ls -lh ${eid}_Metadata.tsv
   """
 }
 
@@ -180,11 +180,12 @@ process make_uploader_config {
   def overwrite   = (params.overwrite != null ? params.overwrite : true)
   def dry_run     = (params.dry_run  != null ? params.dry_run  : false)
   def dataFormatLine = data_format ? "    data_format: \\\"${data_format}\\\"\\n" : ""
+
   """
   #!/usr/bin/env bash
   set -euo pipefail
 
-  cat > cli-config-!{eid}.yml <<_YAML_
+  cat > cli-config-${eid}.yml <<EOF
 version: 1
 submission:
   id: \${CRDC_SUBMISSION_ID}
@@ -192,13 +193,13 @@ auth:
   token_env: CRDC_API_TOKEN
 
 files:
-  - data_file: "!{data_file}"
-    metadata_file: "!{metadata_tsv}"
-!{dataFormatLine}    overwrite: ${overwrite}
+  - data_file: "${data_file}"
+    metadata_file: "${metadata_tsv}"
+${dataFormatLine}    overwrite: ${overwrite}
     dry_run: ${dry_run}
-_YAML_
+EOF
 
-  echo "Wrote cli-config-!{eid}.yml"
+  echo "Wrote cli-config-${eid}.yml"
   """
 }
 
@@ -224,6 +225,7 @@ process crdc_upload {
 
   script:
   def uploader = (task.ext.uploader_cmd ?: 'crdc-uploader').toString()
+
   """
   #!/usr/bin/env bash
   set -euo pipefail
@@ -252,7 +254,7 @@ process crdc_upload {
   export CRDC_SUBMISSION_ID="$CRDC_SUBMISSION_ID"
 
   set -x
-  $uploader_cmd upload --config "!{config_yml}" 2>&1 | tee upload.log
+  $uploader_cmd upload --config "${config_yml}" 2>&1 | tee upload.log
   set +x
 
   # Non-fatal success heuristic
@@ -268,9 +270,4 @@ workflow {
   ch_meta = ch_dl             | make_metadata_tsv
   ch_cfg  = ch_meta           | make_uploader_config
   ch_up   = ch_cfg            | crdc_upload
-
-  // Optional debug
-  // ch_meta.view { meta, datafile, tsv -> "METADATA:\t${eidOf(meta)}\t${tsv}" }
-  // ch_cfg.view  { meta, datafile, yml  -> "CONFIG:\t${eidOf(meta)}\t${yml}" }
-  // ch_up.view   { meta, log            -> "UPLOAD:\t${eidOf(meta)}\t${log}" }
 }
