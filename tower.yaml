@@ -1,3 +1,12 @@
 reports:
-  "**/trace.csv":
-    display: "Nextflow trace file"
+  "reports/trace.csv":
+    display: "Nextflow trace"
+
+  "**/*_Metadata.tsv":
+    display: "CRDC metadata TSV"
+
+  "**/cli-config-*.yml":
+    display: "CRDC uploader config"
+
+  "**/upload.log":
+    display: "CRDC upload log"
