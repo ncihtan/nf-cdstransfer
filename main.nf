@@ -84,51 +84,74 @@ def guessFromList = { List row ->
  PROCESS: synapse_get
 ================================================================================
 */
+
 process synapse_get {
 
-    // Synapse CLI image
-    container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
+    // Use a plain Python image and install synapseclient for reproducibility
+    container 'python:3.11-slim'
 
     tag "${ eidOf(meta) }"
 
     input:
     val(meta)
 
-    // Comes from Tower secret; do NOT hardcode
+    // Tower secret — do NOT hardcode
     secret 'SYNAPSE_AUTH_TOKEN'
 
     output:
     tuple val(meta), path('*')
 
     script:
-    def args = (task.ext.args ?: '').toString()   // e.g. "-r" if you ever fetch folders
+    def args = (task.ext.args ?: '').toString()   // e.g. "-r" to recurse if you ever fetch folders
     def eid  = eidOf(meta)
     """
-    set -euo pipefail
+    #!/usr/bin/env bash
+    set -euxo pipefail
 
-    # More verbose logging to avoid "silent hangs"
-    export PYTHONUNBUFFERED=1
+    # --- Prep environment & tools ---
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y >/dev/null
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg >/dev/null
+    python -m pip install --no-cache-dir --upgrade pip >/dev/null
+    # Pin a recent synapseclient; adjust if you need a specific version
+    python -m pip install --no-cache-dir "synapseclient>=2.7.0" >/dev/null
 
     echo "== synapse_get =="
     echo "Entity ID: ${eid}"
-    synapse --version || true
+    python - <<'PY'
+import synapseclient, sys
+print("synapseclient_version", synapseclient.__version__)
+PY
 
+    # --- Sanity on secret ---
     if [ -z "\${SYNAPSE_AUTH_TOKEN:-}" ]; then
       echo "ERROR: SYNAPSE_AUTH_TOKEN is not set" >&2
       exit 1
     fi
+    toklen=\${#SYNAPSE_AUTH_TOKEN}
+    echo "Token length (masked): \${toklen}"
 
-    synapse login --silent --authToken "\$SYNAPSE_AUTH_TOKEN" --rememberMe
+    # --- Quick network check ---
+    set +e
+    curl -I --max-time 10 https://www.synapse.org || true
+    set -e
 
-    # Download to the current working dir (explicit for clarity)
-    echo "Downloading with: synapse get ${args} ${eid} --downloadLocation ."
-    synapse get ${args} ${eid} --downloadLocation .
+    # --- Non-interactive login (NO rememberMe to avoid writes) ---
+    synapse login --silent --authToken "\$SYNAPSE_AUTH_TOKEN"
 
-    # Normalize filenames (spaces -> underscores)
+    # --- Download with timeout & debug log ---
+    echo "Downloading: synapse get ${args} ${eid} --downloadLocation ."
+    # Create a separate log so .command.out stays readable
+    timeout 1800 synapse --debug get ${args} ${eid} --downloadLocation . 2>&1 | tee synapse_debug.log
+
+    echo "Listing after download:"
+    ls -lAh || true
+
+    # --- Normalize filenames (spaces -> underscores) ---
     shopt -s nullglob
     for f in *\\ *; do mv "\${f}" "\${f// /_}"; done
 
-    echo "Downloaded files:"
+    echo "Final listing:"
     ls -lAh || true
     """
 
@@ -138,6 +161,7 @@ process synapse_get {
     dd if=/dev/urandom of=small_file.tmp bs=1M count=1
     """
 }
+
 
 /*
 ================================================================================
