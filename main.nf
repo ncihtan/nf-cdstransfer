@@ -87,74 +87,73 @@ def guessFromList = { List row ->
 
 process synapse_get {
 
-    // Use a plain Python image and install synapseclient for reproducibility
-    container 'python:3.11-slim'
+    // Keep your existing image
+    container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
 
     tag "${ eidOf(meta) }"
 
     input:
     val(meta)
 
-    // Tower secret — do NOT hardcode
     secret 'SYNAPSE_AUTH_TOKEN'
 
     output:
     tuple val(meta), path('*')
 
     script:
-    def args = (task.ext.args ?: '').toString()   // e.g. "-r" to recurse if you ever fetch folders
+    def args = (task.ext.args ?: '').toString()   // e.g. "-r" if you ever want folders
     def eid  = eidOf(meta)
     """
     #!/usr/bin/env bash
     set -euxo pipefail
 
-    # --- Prep environment & tools ---
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -y >/dev/null
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg >/dev/null
-    python -m pip install --no-cache-dir --upgrade pip >/dev/null
-    # Pin a recent synapseclient; adjust if you need a specific version
-    python -m pip install --no-cache-dir "synapseclient>=2.7.0" >/dev/null
+    # --- Environment hardening to avoid hidden prompts/hangs ---
+    export PYTHONUNBUFFERED=1
+    export PYTHONIOENCODING=UTF-8
+    export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring  # disable keyring usage
+    export HOME="\$PWD"                                           # ensure writable "home"
+    mkdir -p "\$HOME" || true
 
     echo "== synapse_get =="
     echo "Entity ID: ${eid}"
-    python - <<'PY'
-import synapseclient, sys
-print("synapseclient_version", synapseclient.__version__)
-PY
+    synapse --version || true
 
-    # --- Sanity on secret ---
+    # Secret present?
     if [ -z "\${SYNAPSE_AUTH_TOKEN:-}" ]; then
       echo "ERROR: SYNAPSE_AUTH_TOKEN is not set" >&2
       exit 1
     fi
-    toklen=\${#SYNAPSE_AUTH_TOKEN}
-    echo "Token length (masked): \${toklen}"
+    echo "Token length (masked): \${#SYNAPSE_AUTH_TOKEN}"
 
-    # --- Quick network check ---
+    # Quick network probe (fails fast if egress/DNS is blocked)
     set +e
-    curl -I --max-time 10 https://www.synapse.org || true
+    curl -fsSI --max-time 10 https://www.synapse.org >/dev/null
+    curl_ok=\$?
     set -e
+    if [ "\$curl_ok" -ne 0 ]; then
+      echo "ERROR: Network/egress check to synapse.org failed (code \$curl_ok)" >&2
+      exit 1
+    fi
 
-    # --- Non-interactive login (NO rememberMe to avoid writes) ---
+    # Non-interactive token login (NO rememberMe)
     synapse login --silent --authToken "\$SYNAPSE_AUTH_TOKEN"
 
-    # --- Download with timeout & debug log ---
     echo "Downloading: synapse get ${args} ${eid} --downloadLocation ."
-    # Create a separate log so .command.out stays readable
+    # Hard timeout so it cannot hang forever (30 min)
+    # Also capture verbose CLI logs for forensics
     timeout 1800 synapse --debug get ${args} ${eid} --downloadLocation . 2>&1 | tee synapse_debug.log
 
     echo "Listing after download:"
     ls -lAh || true
 
-    # --- Normalize filenames (spaces -> underscores) ---
+    # Normalize filenames (spaces -> underscores)
     shopt -s nullglob
     for f in *\\ *; do mv "\${f}" "\${f// /_}"; done
 
     echo "Final listing:"
     ls -lAh || true
     """
-
+    
     stub:
     """
     echo "Stub: creating a fake file for testing..."
