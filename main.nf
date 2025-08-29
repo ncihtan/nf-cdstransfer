@@ -9,16 +9,18 @@ nextflow.enable.dsl = 2
 
 include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
+// Default to the bundled samplesheet.csv in the repo root
+params.input = params.input ?: "$projectDir/samplesheet.csv"
+
 // Validate input parameters
 validateParameters()
 
 // Print summary of supplied parameters
 log.info paramsSummaryLog(workflow)
 
-// Build channel of meta maps from samplesheet (aliases handled by schema "meta")
+// Build channel of meta maps from samplesheet
 ch_input = Channel
     .fromList(samplesheetToList(params.input, "assets/schema_input.json"))
-
 /*
 ================================================================================
  PROCESS: synapse_get
