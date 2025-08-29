@@ -1,17 +1,18 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.com/nextflow_schema.json",
   "title": "CRDC Uploader Pipeline Schema",
+  "description": "Parameters for the Nextflow pipeline.",
   "type": "object",
   "properties": {
     "input": {
       "type": "string",
-      "description": "Path to the samplesheet CSV (relative to projectDir by default).",
+      "description": "Path/URL to samplesheet CSV (defaults to repo copy in main.nf).",
       "default": "samplesheet.csv"
     },
     "dry_run": {
       "type": "boolean",
-      "description": "Generate configs/metadata but skip the actual upload.",
+      "description": "Generate configs/metadata but skip actual CRDC upload.",
       "default": false
     },
     "overwrite": {
@@ -20,6 +21,5 @@
       "default": true
     }
   },
-  "required": [],
   "additionalProperties": true
 }
