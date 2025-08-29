@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.com/samplesheet.schema.json",
   "title": "Samplesheet Schema",
   "description": "Schema for validating rows in samplesheet.csv.",
@@ -47,7 +47,7 @@
       },
       "experimental_strategy_and_data_subtypes": {
         "type": "string",
-        "description": "Experimental strategy / data subtype value expected by CRDC.",
+        "description": "Experimental strategy / data subtype expected by CRDC.",
         "meta": ["experimental_strategy", "Experimental_Strategy"]
       },
       "submission_version": {
@@ -62,7 +62,7 @@
       },
       "checksum_algorithm": {
         "type": "string",
-        "description": "Checksum algorithm name.",
+        "description": "Checksum algorithm.",
         "enum": ["md5", "sha1", "sha256", "sha512", "none"],
         "default": "md5",
         "meta": ["Checksum_Algorithm"]
@@ -79,7 +79,7 @@
         "meta": ["Release_Datetime"]
       },
       "is_supplementary_file": {
-        "description": "Whether this is a supplementary file (boolean or common string forms).",
+        "description": "Whether this is a supplementary file.",
         "oneOf": [
           { "type": "boolean" },
           { "type": "string", "enum": ["true", "false", "TRUE", "FALSE", "yes", "no", "YES", "NO", "0", "1"] }
