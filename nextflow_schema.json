@@ -1,60 +1,39 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/ncihtan/nf-cdstransfer/main/nextflow_schema.json",
-  "title": "nf-cdstransfer",
-  "description": "Workflow to transfer data from Synapse to CDS",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/nextflow_schema.json",
+  "title": "CRDC Uploader Pipeline Schema",
+  "description": "Parameter schema for the Nextflow pipeline that downloads files from Synapse, generates metadata/config, and uploads to CRDC.",
+
   "type": "object",
-  "definitions": {
-    "input_output_options": {
-      "title": "Input/output options",
-      "type": "object",
-      "fa_icon": "fas fa-terminal",
-      "description": "Define where the pipeline should find input data and save output data.",
-      "required": ["input"],
-      "properties": {
-        "input": {
-          "type": "string",
-          "format": "file-path",
-          "exists": true,
-          "mimetype": "text/csv",
-          "pattern": "^\\S+\\.csv$",
-          "description": "Path to comma-separated file containing information about entities to be transferred",
-          "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row.",
-          "fa_icon": "fas fa-file-csv"
-        },
-        "dryrun": {
-          "type": "boolean",
-          "default": false,
-          "description": "Run the pipeline in dry-run mode",
-          "help_text": "If this parameter is set to true, the pipeline will not transfer any data, but will print out the commands that would be executed. This is useful for testing the pipeline before running it for real.",
-          "fa_icon": "fas fa-flask"
-        },
-        "take_n": {
-          "type": "integer",
-          "default": -1,
-          "description": "Only take the first N rows of the input file. Set to -1 to read all rows.",
-          "help_text": "Use this parameter to limit the number of rows read from the input file. This is useful for testing the pipeline on a subset of the data before running it for real.",
-          "fa_icon": "fas fa-filter"
-        },
-        "aws_secret_prefix": {
-          "type": "string",
-          "default": "CDS",
-          "description": "Prefix for AWS secrets to be used in the pipeline.",
-          "help_text": "Specify the prefix for AWS secrets, e.g., 'HTAN'. This prefix will be used to load the corresponding AWS access key and secret key from {prefix}_ACCESS_KEY and {prefix}_SECRET_KEY secrets in the Nextflow secrets manager.",
-          "fa_icon": "fas fa-key"
-        },
-        "change_bucket": {
-          "type": "string",
-          "description": "Bucket name to replace those in the input file",
-          "help_text": "Replaces the bucket names in the input file with the specified bucket name. This is useful when you want to transfer data to a different bucket than the one specified in the input file.",
-          "fa_icon": "fas fa-bucket"
-        }
-      }
+  "properties": {
+
+    "input": {
+      "type": "string",
+      "description": "Path to the samplesheet CSV file containing entityId and metadata.",
+      "format": "file-path"
+    },
+
+    "dry_run": {
+      "type": "boolean",
+      "description": "If true, generate configs/metadata but do not actually upload to CRDC.",
+      "default": false
+    },
+
+    "overwrite": {
+      "type": "boolean",
+      "description": "If true, allow overwriting files on CRDC upload.",
+      "default": true
     }
   },
-  "allOf": [
-    {
-      "$ref": "#/definitions/input_output_options"
+
+  "required": ["input"],
+
+  "additionalProperties": false,
+
+  "definitions": {
+    "samplesheet": {
+      "$ref": "assets/schema_input.json"
     }
-  ]
+  }
 }
+
