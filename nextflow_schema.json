@@ -10,7 +10,8 @@
     "input": {
       "type": "string",
       "description": "Path to the samplesheet CSV file containing entityId and metadata.",
-      "format": "file-path"
+      "format": "file-path",
+      "default": "${projectDir}/samplesheet.csv"
     },
 
     "dry_run": {
@@ -36,4 +37,5 @@
     }
   }
 }
+
 
