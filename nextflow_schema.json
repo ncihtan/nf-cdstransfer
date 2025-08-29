@@ -2,40 +2,24 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://example.com/nextflow_schema.json",
   "title": "CRDC Uploader Pipeline Schema",
-  "description": "Parameter schema for the Nextflow pipeline that downloads files from Synapse, generates metadata/config, and uploads to CRDC.",
-
   "type": "object",
   "properties": {
-
     "input": {
       "type": "string",
-      "description": "Path to the samplesheet CSV file containing entityId and metadata.",
-      "format": "file-path",
-      "default": "${projectDir}/samplesheet.csv"
+      "description": "Path to the samplesheet CSV (relative to projectDir by default).",
+      "default": "samplesheet.csv"
     },
-
     "dry_run": {
       "type": "boolean",
-      "description": "If true, generate configs/metadata but do not actually upload to CRDC.",
+      "description": "Generate configs/metadata but skip the actual upload.",
       "default": false
     },
-
     "overwrite": {
       "type": "boolean",
-      "description": "If true, allow overwriting files on CRDC upload.",
+      "description": "Allow overwriting files on upload.",
       "default": true
     }
   },
-
-  "required": ["input"],
-
-  "additionalProperties": false,
-
-  "definitions": {
-    "samplesheet": {
-      "$ref": "assets/schema_input.json"
-    }
-  }
+  "required": [],
+  "additionalProperties": true
 }
-
-
