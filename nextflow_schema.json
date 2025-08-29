@@ -2,13 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.com/nextflow_schema.json",
   "title": "CRDC Uploader Pipeline Schema",
-  "description": "Parameters for the Nextflow pipeline.",
-
   "type": "object",
   "properties": {
     "input": {
       "type": "string",
-      "description": "Path or URL to the samplesheet CSV file. If omitted, defaults to samplesheet.csv in the repo root (resolved in main.nf)."
+      "description": "Path or URL to the samplesheet CSV. If omitted, main.nf defaults to ${projectDir}/samplesheet.csv."
     },
     "dry_run": {
       "type": "boolean",
@@ -21,5 +19,5 @@
       "default": true
     }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }
