@@ -30,14 +30,14 @@ log.info paramsSummaryLog(workflow)
 ch_input = Channel.fromList( samplesheetToList(RESOLVED_INPUT, "assets/schema_input.json") )
 
 /* =============================================================================
-   SMALL HELPERS (closures — safer in older NF/Groovy)
+   SMALL HELPERS (closures)
    ========================================================================== */
 eidOf = { meta ->
   if (meta instanceof Map) {
     return meta.entityId ?: meta.entityid ?: meta.entity_id ?: 'unknown_syn'
   }
   if (meta instanceof List) {
-    def m = meta.find { it instanceof CharSequence && (it ==~ /syn\d+/) }
+    def m = meta.find { it instanceof CharSequence && ( it ==~ /syn\d+/ ) }
     return m ?: 'unknown_syn'
   }
   'unknown_syn'
@@ -61,7 +61,6 @@ getf = { meta, keys, defval = '' ->
    ========================================================================== */
 process synapse_get {
 
-  // Dummy generator: makes a file named like file_name, sized to file_size bytes
   container 'python:3.11-slim'
   tag "${ eidOf(meta) }"
 
@@ -80,25 +79,23 @@ process synapse_get {
   set -euo pipefail
 
   RAW_NAME="!{fname}"
-  SAFE_NAME=\$(basename "\$RAW_NAME" | tr -c 'A-Za-z0-9._-' '_' )
+  SAFE_NAME=$(basename "$RAW_NAME" | tr -c "A-Za-z0-9._-" "_" )
 
   RAW_SIZE="!{fsize}"
-  # strip commas/spaces without using \${VAR//…} (avoids Groovy `${}` collision)
-  RAW_SIZE=\$(printf '%s' "\$RAW_SIZE" | tr -d ' ,' )
+  RAW_SIZE=$(printf "%s" "$RAW_SIZE" | tr -d " ," )
 
   # default to 1 MiB if missing or non-numeric
-  if ! printf '%s' "\$RAW_SIZE" | grep -Eq '^[0-9]+$' || [ -z "\$RAW_SIZE" ]; then
+  if ! printf "%s" "$RAW_SIZE" | grep -Eq "^[0-9]+$" || [ -z "$RAW_SIZE" ]; then
     RAW_SIZE=1048576
   fi
 
-  echo "Creating dummy file: \$SAFE_NAME (\$RAW_SIZE bytes)"
-  truncate -s "\$RAW_SIZE" "\$SAFE_NAME" || dd if=/dev/zero of="\$SAFE_NAME" bs=1 count="\$RAW_SIZE" >/dev/null 2>&1 || true
-  dd if=/dev/urandom of="\$SAFE_NAME" bs=1024 count=1 conv=notrunc >/dev/null 2>&1 || true
+  echo "Creating dummy file: $SAFE_NAME ($RAW_SIZE bytes)"
+  truncate -s "$RAW_SIZE" "$SAFE_NAME" || dd if=/dev/zero of="$SAFE_NAME" bs=1 count="$RAW_SIZE" >/dev/null 2>&1 || true
+  dd if=/dev/urandom of="$SAFE_NAME" bs=1024 count=1 conv=notrunc >/dev/null 2>&1 || true
 
-  ls -lAh "\$SAFE_NAME"
+  ls -lAh "$SAFE_NAME"
   """
 }
-
 
 /* =============================================================================
    PROCESS: make_metadata_tsv
@@ -135,29 +132,29 @@ process make_metadata_tsv {
   def is_supplementary  = getf(meta, ['is_supplementary_file'], '')
   def desired           = file_name?.replace(' ', '_') ?: ''
   """
+  #!/usr/bin/env bash
   set -euo pipefail
 
-  # choose data file (exclude Nextflow internals)
   SELECTED=""
   if [ -n "${desired}" ] && [ -f "${desired}" ]; then
     SELECTED="${desired}"
   else
-    mapfile -t FILES < <(find . -maxdepth 1 -type f ! -name ".command*" -printf "%f\\n" | sort)
-    if [ "\${#FILES[@]}" -gt 0 ]; then
-      SELECTED="\${FILES[0]}"
+    mapfile -t FILES < <(find . -maxdepth 1 -type f ! -name ".command*" -printf "%f\n" | sort)
+    if [ "${#FILES[@]}" -gt 0 ]; then
+      SELECTED="${FILES[0]}"
     fi
   fi
-  if [ -z "\$SELECTED" ] || [ ! -f "\$SELECTED" ]; then
+  if [ -z "$SELECTED" ] || [ ! -f "$SELECTED" ]; then
     echo "ERROR: No data file found for !{eid}" >&2
     exit 1
   fi
 
-  cat > !{eid}_Metadata.tsv <<'TSV'
+  cat > !{eid}_Metadata.tsv <<_TSV_
 type	study.phs_accession	participant.study_participant_id	sample.sample_id	file_name	file_type	file_description	file_size	md5sum	experimental_strategy_and_data_subtypes	submission_version	checksum_value	checksum_algorithm	file_mapping_level	release_datetime	is_supplementary_file
-file	${study_phs}	${participant_id}	${sample_id}	${file_name}	${file_type}	${file_description}	${file_size}	${md5sum}	${strategy}	${submission_version}	${checksum_value}	${checksum_algorithm}	${file_mapping_level}	${release_datetime}	${is_supplementary}
-TSV
+file	!{study_phs}	!{participant_id}	!{sample_id}	!{file_name}	!{file_type}	!{file_description}	!{file_size}	!{md5sum}	!{strategy}	!{submission_version}	!{checksum_value}	!{checksum_algorithm}	!{file_mapping_level}	!{release_datetime}	!{is_supplementary}
+_TSV_
 
-  ln -sf "\$SELECTED" DATAFILE_SELECTED
+  ln -sf "$SELECTED" DATAFILE_SELECTED
   ls -lh !{eid}_Metadata.tsv
   """
 }
@@ -187,7 +184,7 @@ process make_uploader_config {
   #!/usr/bin/env bash
   set -euo pipefail
 
-  cat > cli-config-!{eid}.yml <<EOF
+  cat > cli-config-!{eid}.yml <<_YAML_
 version: 1
 submission:
   id: \${CRDC_SUBMISSION_ID}
@@ -199,7 +196,7 @@ files:
     metadata_file: "!{metadata_tsv}"
 !{dataFormatLine}    overwrite: ${overwrite}
     dry_run: ${dry_run}
-EOF
+_YAML_
 
   echo "Wrote cli-config-!{eid}.yml"
   """
@@ -242,23 +239,23 @@ process crdc_upload {
 
   uploader_cmd=""
   for c in ${uploader} crdc-uploader crdc_datahub_uploader; do
-    if command -v "\$c" >/dev/null 2>&1; then uploader_cmd="\$c"; break; fi
+    if command -v "$c" >/dev/null 2>&1; then uploader_cmd="$c"; break; fi
   done
-  if [ -z "\$uploader_cmd" ]; then
+  if [ -z "$uploader_cmd" ]; then
     echo "ERROR: CRDC uploader CLI not found after installation." >&2
     exit 1
   fi
-  echo "Using uploader: \${uploader_cmd}"
-  \${uploader_cmd} --version || true
+  echo "Using uploader: $uploader_cmd"
+  $uploader_cmd --version || true
 
-  export CRDC_API_TOKEN="\$CRDC_API_TOKEN"
-  export CRDC_SUBMISSION_ID="\$CRDC_SUBMISSION_ID"
+  export CRDC_API_TOKEN="$CRDC_API_TOKEN"
+  export CRDC_SUBMISSION_ID="$CRDC_SUBMISSION_ID"
 
   set -x
-  \${uploader_cmd} upload --config "!{config_yml}" 2>&1 | tee upload.log
+  $uploader_cmd upload --config "!{config_yml}" 2>&1 | tee upload.log
   set +x
 
-  # Consider this a success only if typical markers are present (non-fatal otherwise)
+  # Non-fatal success heuristic
   grep -Ei "success|completed|submitted" upload.log >/dev/null || true
   """
 }
@@ -277,4 +274,3 @@ workflow {
   // ch_cfg.view  { meta, datafile, yml  -> "CONFIG:\t${eidOf(meta)}\t${yml}" }
   // ch_up.view   { meta, log            -> "UPLOAD:\t${eidOf(meta)}\t${log}" }
 }
-
