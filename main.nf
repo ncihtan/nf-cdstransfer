@@ -61,6 +61,7 @@ getf = { meta, keys, defval = '' ->
    ========================================================================== */
 process synapse_get {
 
+  // Dummy generator: makes a file named like file_name, sized to file_size bytes
   container 'python:3.11-slim'
   tag "${ eidOf(meta) }"
 
@@ -79,24 +80,25 @@ process synapse_get {
   set -euo pipefail
 
   RAW_NAME="!{fname}"
-  SAFE_NAME="\$(basename "\$RAW_NAME" | tr -c 'A-Za-z0-9._-' '_' )"
+  SAFE_NAME=\$(basename "\$RAW_NAME" | tr -c 'A-Za-z0-9._-' '_' )
 
   RAW_SIZE="!{fsize}"
-  RAW_SIZE="\${RAW_SIZE//,/}"
-  RAW_SIZE="\${RAW_SIZE// /}"
+  # strip commas/spaces without using \${VAR//…} (avoids Groovy `${}` collision)
+  RAW_SIZE=\$(printf '%s' "\$RAW_SIZE" | tr -d ' ,' )
 
-  # default to 1 MiB if size missing/non-numeric
-  if ! [[ "\$RAW_SIZE" =~ ^[0-9]+$ ]] || [ -z "\$RAW_SIZE" ]; then
+  # default to 1 MiB if missing or non-numeric
+  if ! printf '%s' "\$RAW_SIZE" | grep -Eq '^[0-9]+$' || [ -z "\$RAW_SIZE" ]; then
     RAW_SIZE=1048576
   fi
 
-  echo "Creating dummy file: \${SAFE_NAME} (\${RAW_SIZE} bytes)"
-  truncate -s "\$RAW_SIZE" "\${SAFE_NAME}" || dd if=/dev/zero of="\${SAFE_NAME}" bs=1 count="\$RAW_SIZE" >/dev/null 2>&1 || true
-  dd if=/dev/urandom of="\${SAFE_NAME}" bs=1024 count=1 conv=notrunc >/dev/null 2>&1 || true
+  echo "Creating dummy file: \$SAFE_NAME (\$RAW_SIZE bytes)"
+  truncate -s "\$RAW_SIZE" "\$SAFE_NAME" || dd if=/dev/zero of="\$SAFE_NAME" bs=1 count="\$RAW_SIZE" >/dev/null 2>&1 || true
+  dd if=/dev/urandom of="\$SAFE_NAME" bs=1024 count=1 conv=notrunc >/dev/null 2>&1 || true
 
-  ls -lAh "\${SAFE_NAME}"
+  ls -lAh "\$SAFE_NAME"
   """
 }
+
 
 /* =============================================================================
    PROCESS: make_metadata_tsv
