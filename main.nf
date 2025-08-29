@@ -3,57 +3,60 @@ nextflow.enable.dsl = 2
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    PARAMETERS AND INPUTS
+    PARAMETERS / INPUT RESOLUTION
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
 include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
-// ---- Resolve samplesheet path WITHOUT reassigning params.input ----
+// Resolve samplesheet path (URL, absolute, or repo-relative "samplesheet.csv")
 def _raw = params.input ?: 'samplesheet.csv'
 def _isUrl = (_raw ==~ /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//)
 def _abs   = file(_raw).isAbsolute()
 def repoPath = file("${projectDir}/${_raw}")
-
-// Priority: URL → absolute (if exists) → repo copy → repo fallback
-def resolved_input = _isUrl ? _raw
+def RESOLVED_INPUT = _isUrl ? _raw
                     : (_abs && file(_raw).exists()) ? file(_raw).toString()
                     : (repoPath.exists() ? repoPath.toString() : repoPath.toString())
 
 log.info "projectDir          = ${projectDir}"
 log.info "params.input (raw)  = ${params.input ?: '(unset)'}"
-log.info "resolved_input      = ${resolved_input}"
-log.info "resolved exists?    = ${file(resolved_input).exists()}"
+log.info "resolved_input      = ${RESOLVED_INPUT}"
+log.info "resolved exists?    = ${file(RESOLVED_INPUT).exists()}"
 
-// Validate pipeline params & print summary
+// Validate & print summary (nf-schema plugin)
 validateParameters()
 log.info paramsSummaryLog(workflow)
 
-// Build channel of meta rows from samplesheet (can be Map *or* List depending on schema)
-ch_input = Channel.fromList( samplesheetToList(resolved_input, "assets/schema_input.json") )
+// Build channel of meta rows from the samplesheet according to schema
+Channel
+  .fromList( samplesheetToList(RESOLVED_INPUT, "assets/schema_input.json") )
+  .set { ch_input }
 
-// ---------- Helpers ----------
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    HELPERS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
 
-// Prefer entityId/entityid/entity_id if Map; if List, find first value matching syn\d+
+// Prefer these keys for Synapse ID; if a List row, grab the first "syn####"
 def eidOf = { m ->
   if (m instanceof Map)  return m.entityId ?: m.entityid ?: m.entity_id
   if (m instanceof List) return (m.find { it instanceof CharSequence && (it ==~ /syn\d+/) } ?: 'unknown_syn')
   'unknown_syn'
 }
 
-// Get first existing field from a Map using a list of candidate keys
+// Get first existing non-empty field from a Map, else default
 def getf = { m, List<String> keys, def defval = '' ->
-  (m instanceof Map) ? (keys.findResult { k -> m.containsKey(k) && m[k] != null && m[k].toString().trim() ? m[k] : null } ?: defval) : defval
+  (m instanceof Map) ? (keys.findResult { k -> (m.containsKey(k) && m[k] != null && m[k].toString().trim()) ? m[k] : null } ?: defval) : defval
 }
 
-// Heuristic guesses when a row is a List (best-effort only)
+// Best-effort guesses if a row is a List (no headers available)
 def guessFromList = { List row ->
   def firstMatch = { Closure<Boolean> pred -> row.find { it instanceof CharSequence && pred(it as CharSequence) } ?: '' }
   def isMd5      = { CharSequence s -> s ==~ /(?i)^[a-f0-9]{32}$/ }
   def isNumber   = { CharSequence s -> s ==~ /^\d+$/ }
   def isType     = { CharSequence s -> s in ['BAM','FASTQ','TSV','CSV','CRAM','VCF','TXT'] }
   def looksFile  = { CharSequence s -> s ==~ /.+\.(bam|bai|cram|crai|fastq(\.gz)?|fq(\.gz)?|vcf(\.gz)?|tsv|csv|txt)$/ }
-
   [
     study_phs_accession : firstMatch { it ==~ /^phs\d{6,}$/ },
     participant_id      : '',
@@ -73,47 +76,39 @@ def guessFromList = { List row ->
   ]
 }
 
-
 /*
 ================================================================================
- PROCESS: synapse_get
- - Non-interactive token login (no prompts)
- - Network probe & 30-min timeout on download
- - Clear DONE marker + hard check at least one file was fetched
+ PROCESS: synapse_get  (DUMMY GENERATOR)
+ - Does NOT contact Synapse.
+ - Creates a dummy file named like meta.file_name (or <entity>.tmp) and sized
+   to meta.file_size bytes (or 1 MiB default).
  - Emits: tuple val(meta), path('*')
 ================================================================================
 */
-
 process synapse_get {
 
-    // Simple base image with coreutils (truncate, dd)
     container 'python:3.11-slim'
-
     tag "${ eidOf(meta) }"
 
     input:
     val(meta)
 
     output:
-    // Emits the synthetic file into the work dir
     tuple val(meta), path('*')
 
     script:
-    // Pull name/size from the row; fall back to sensible defaults
     def eid   = eidOf(meta)
-    def fname = (meta.file_name ?: "${eid}.tmp").toString()
-    def fsize = (meta.file_size ?: '').toString()   // expected in bytes; may be blank
+    def fname = (getf(meta, ['file_name'], "${eid}.tmp") as String)
+    def fsize = (getf(meta, ['file_size'], '') as String)
 
     """
     #!/usr/bin/env bash
     set -euo pipefail
 
     RAW_NAME="${fname}"
-    # sanitize to a safe basename
     SAFE_NAME="\$(basename "\$RAW_NAME" | tr -c 'A-Za-z0-9._-' '_' )"
 
     RAW_SIZE="${fsize:-}"
-    # strip commas/spaces
     RAW_SIZE="\${RAW_SIZE//,/}"
     RAW_SIZE="\${RAW_SIZE// /}"
 
@@ -122,28 +117,21 @@ process synapse_get {
       RAW_SIZE=1048576
     fi
 
-    echo "Creating dummy file for ${eid}: \${SAFE_NAME} (\${RAW_SIZE} bytes)"
+    echo "Creating dummy file: \${SAFE_NAME} (\${RAW_SIZE} bytes)"
+    # Create sparse file at requested size; then write 1 KiB random so it's not all zeros
+    truncate -s "\$RAW_SIZE" "\${SAFE_NAME}"
+    dd if=/dev/urandom of="\${SAFE_NAME}" bs=1024 count=1 conv=notrunc >/dev/null 2>&1 || true
 
-    # Fast create the file at the requested size (sparse), then write 1 KiB random
-    # so it's not entirely zeroed on filesystems that support sparseness.
-    truncate -s "\$RAW_SIZE" "\$SAFE_NAME"
-    dd if=/dev/urandom of="\$SAFE_NAME" bs=1024 count=1 conv=notrunc >/dev/null 2>&1 || true
-
-    ls -lAh "\$SAFE_NAME"
+    ls -lAh "\${SAFE_NAME}"
     """
 }
-
-
-
 
 /*
 ================================================================================
  PROCESS: make_metadata_tsv
- - Builds CRDC-style TSV strictly from samplesheet values (no file probing)
- - Picks one data file to pass downstream:
-     * Prefer basename matching meta.file_name (after space->underscore)
-     * Else first regular file in work dir (excluding logs/.command*)
- - Emits: tuple val(meta), path("*_Metadata.tsv"), path("DATAFILE_SELECTED")
+ - Builds CRDC-style TSV strictly from samplesheet values (no file probing).
+ - Selects a data file to pass downstream (prefer file_name match, else first file).
+ - Emits: tuple val(meta), path("DATAFILE_SELECTED"), path("<eid>_Metadata.tsv")
 ================================================================================
 */
 process make_metadata_tsv {
@@ -154,11 +142,10 @@ process make_metadata_tsv {
     tuple val(meta), path(downloaded_files)
 
     output:
-    tuple val(meta), path("*_Metadata.tsv"), path("DATAFILE_SELECTED")
+    tuple val(meta), path("DATAFILE_SELECTED"), path("*_Metadata.tsv")
 
     script:
     def eid               = eidOf(meta)
-    // Support dotted or flat keys from the samplesheet
     def study_phs         = getf(meta, ['study.phs_accession','study_phs_accession'], 'phs002371')
     def participant_id    = getf(meta, ['participant.study_participant_id','study_participant_id'], '')
     def sample_id         = getf(meta, ['sample.sample_id','sample_id','HTAN_Assayed_Biospecimen_ID'], '')
@@ -175,7 +162,6 @@ process make_metadata_tsv {
     def release_datetime  = getf(meta, ['release_datetime'], '')
     def is_supplementary  = getf(meta, ['is_supplementary_file'], '')
 
-    // If meta is a List, try a best-effort guess to avoid blanks
     if (!(meta instanceof Map) && (meta instanceof List)) {
       def g = guessFromList(meta as List)
       study_phs          = study_phs          ?: g.study_phs_accession
@@ -191,42 +177,40 @@ process make_metadata_tsv {
     """
     set -euo pipefail
 
-    # Choose a data file to pass on (exclude debug & nextflow files)
+    # Choose a data file (exclude Nextflow log files)
     SELECTED=""
     if [ -n "${desired}" ] && [ -f "${desired}" ]; then
       SELECTED="${desired}"
     else
-      mapfile -t FILES < <(find . -maxdepth 1 -type f ! -name "synapse_debug.log" ! -name ".command*" -printf "%f\\n" | sort)
+      mapfile -t FILES < <(find . -maxdepth 1 -type f ! -name ".command*" -printf "%f\\n" | sort)
       if [ "\${#FILES[@]}" -gt 0 ]; then
         SELECTED="\${FILES[0]}"
       fi
     fi
-
     if [ -z "\$SELECTED" ] || [ ! -f "\$SELECTED" ]; then
       echo "ERROR: No data file found for ${eid}" >&2
       exit 1
     fi
 
-    # Write TSV strictly from samplesheet values
+    # Write the TSV from samplesheet values only
     cat > ${eid}_Metadata.tsv <<'TSV'
 type	study.phs_accession	participant.study_participant_id	sample.sample_id	file_name	file_type	file_description	file_size	md5sum	experimental_strategy_and_data_subtypes	submission_version	checksum_value	checksum_algorithm	file_mapping_level	release_datetime	is_supplementary_file
 file	${study_phs}	${participant_id}	${sample_id}	${file_name}	${file_type}	${file_description}	${file_size}	${md5sum}	${strategy}	${submission_version}	${checksum_value}	${checksum_algorithm}	${file_mapping_level}	${release_datetime}	${is_supplementary}
 TSV
 
-    # Expose selected data file under a stable name for downstream binding
+    # Expose the selected file under a stable name
     ln -sf "\$SELECTED" DATAFILE_SELECTED
 
     ls -lh ${eid}_Metadata.tsv
     """
 }
 
-
 /*
 ================================================================================
  PROCESS: make_uploader_config
- - Creates per-file uploader YAML referencing Tower secrets for auth
- - Passes the selected data file through
- - Emits: tuple val(meta), path(data_file), path("cli-config-*.yml")
+ - Creates per-file uploader YAML referencing Tower secrets at runtime.
+ - Passes the selected data file through.
+ - Emits: tuple val(meta), path(data_file), path("cli-config-<eid>.yml")
 ================================================================================
 */
 process make_uploader_config {
@@ -240,10 +224,10 @@ process make_uploader_config {
     tuple val(meta), path(data_file), path("cli-config-*.yml")
 
     script:
-    def data_format = (getf(meta, ['file_type'], '') ?: '').toString()
-    def overwrite   = params.overwrite as boolean
-    def dry_run     = params.dry_run as boolean
     def eid         = eidOf(meta)
+    def data_format = (getf(meta, ['file_type'], '') ?: '').toString()
+    def overwrite   = (params.overwrite != null ? params.overwrite : true)
+    def dry_run     = (params.dry_run  != null ? params.dry_run  : false)
 
     """
     set -euo pipefail
@@ -267,24 +251,17 @@ YAML
     """
 }
 
-
 /*
 ================================================================================
  PROCESS: crdc_upload
- - Ensures CRDC uploader CLI is available (or installs it)
- - Uses Tower secrets: CRDC_API_TOKEN, CRDC_SUBMISSION_ID
- - Runs the upload with generated YAML
+ - Uses Tower secrets CRDC_API_TOKEN / CRDC_SUBMISSION_ID.
+ - Real uploader is commented; this stub just logs. Enable real upload later.
  - Emits: tuple val(meta), path("upload.log")
 ================================================================================
 */
 process crdc_upload {
 
-    // Option A: prebuilt image with uploader baked in (preferred)
-    // container 'ghcr.io/<your-org>/crdc-datahub-cli-uploader:latest'
-
-    // Option B: install on the fly (works; slower)
     container 'python:3.11-slim'
-
     tag "${ eidOf(meta) }"
 
     input:
@@ -296,44 +273,30 @@ process crdc_upload {
     output:
     tuple val(meta), path("upload.log")
 
+    /*
+    // --- Real uploader example (uncomment to enable) ---
     script:
     def uploader = (task.ext.uploader_cmd ?: 'crdc-uploader').toString()
-    def eid      = eidOf(meta)
     """
     set -euo pipefail
-
-    apt-get update -y >/dev/null 2>&1 || true
-    apt-get install -y --no-install-recommends git ca-certificates >/dev/null 2>&1 || true
     python -m pip install --no-cache-dir --upgrade pip >/dev/null
-
-    if ! command -v ${uploader} >/dev/null 2>&1; then
-      echo "CRDC uploader not found; installing..."
-      python -m pip install --no-cache-dir "git+https://github.com/CBIIT/crdc-datahub-cli-uploader.git" >/dev/null
-      for c in crdc-uploader crdc_datahub_uploader; do
-        if command -v "\$c" >/dev/null 2>&1; then uploader_cmd="\$c"; break; fi
-      done
-      : "\${uploader_cmd:=crdc-uploader}"
-    else
-      uploader_cmd="${uploader}"
-    fi
-
-    echo "Using uploader: \${uploader_cmd}"
-    \${uploader_cmd} --help >/dev/null || true
-
+    python -m pip install --no-cache-dir "git+https://github.com/CBIIT/crdc-datahub-cli-uploader.git" >/dev/null
     export CRDC_API_TOKEN="\$CRDC_API_TOKEN"
     export CRDC_SUBMISSION_ID="\$CRDC_SUBMISSION_ID"
-
     set -x
-    \${uploader_cmd} upload --config "${config_yml}" 2>&1 | tee upload.log
+    crdc-uploader upload --config "${config_yml}" 2>&1 | tee upload.log
     set +x
     """
+    */
 
-    stub:
+    // --- Safe stub (default) ---
+    script:
+    def eid = eidOf(meta)
     """
+    set -euo pipefail
     echo "Stub upload for ${eid}" | tee upload.log
     """
 }
-
 
 /*
 ================================================================================
@@ -346,8 +309,8 @@ workflow {
   ch_cfg  = ch_meta           | make_uploader_config
   ch_up   = ch_cfg            | crdc_upload
 
-  // Visibility
-  ch_meta.view { meta, tsv, datafile -> "METADATA:\t${eidOf(meta)}\t${tsv}" }
-  ch_cfg.view  { meta, yml -> "CONFIG:\t${eidOf(meta)}\t${yml}" }
-  ch_up.view   { meta, log -> "UPLOAD:\t${eidOf(meta)}\t${log}" }
+  // Visibility in the main log
+  ch_meta.view { meta, datafile, tsv -> "METADATA:\t${eidOf(meta)}\t${tsv}" }
+  ch_cfg.view  { meta, datafile, yml  -> "CONFIG:\t${eidOf(meta)}\t${yml}" }
+  ch_up.view   { meta, log            -> "UPLOAD:\t${eidOf(meta)}\t${log}" }
 }
