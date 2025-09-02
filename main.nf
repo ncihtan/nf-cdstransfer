@@ -1,6 +1,12 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl = 2
 
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    PARAMETERS AND INPUTS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
 // ---- Resolve samplesheet path (local or GitHub/raw URL) ----
@@ -22,18 +28,23 @@ ch_input = Channel.fromList(
     samplesheetToList(resolved_input, "assets/schema_input.json")
 )
 
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    PROCESSES
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process synapse_get {
 
     // Synapse Python Client container
     container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
 
-    // Label tasks by entityid for easier logs/tracing
     tag "${meta.entityid}"
 
     input:
     val(meta)
 
-    // Use your custom secret name
+    // Use your custom secret
     secret 'SYNAPSE_AUTH_TOKEN_DYP'
 
     output:
@@ -47,7 +58,63 @@ process synapse_get {
     """
 }
 
+process subset_row_without_entityid {
+
+    tag "${meta.sample_id ?: meta.file_name}"
+
+    input:
+    tuple val(meta), path(files)
+
+    output:
+    tuple val(clean_meta), path(files)
+
+    script:
+    // Strip out 'entityid' key from this row (meta Map)
+    def clean_meta = meta.findAll { k, v -> k != 'entityid' }
+    """
+    # Nothing to change in the files, just forwarding
+    echo "Subset row for \${meta.file_name}, dropped entityid"
+    """
+}
+
+process make_config_yml {
+
+    tag "${meta.file_name}"
+
+    input:
+    tuple val(meta), path(files)
+
+    output:
+    tuple val(meta), path("cli-config-*_file.yml")
+
+    script:
+    // Derive manifest name dynamically
+    def manifest = "CDS_Data_Loading_v8.0.3_Stanford_Submission_${meta.file_name}_Metadata.tsv"
+
+    """
+    cat > cli-config-${meta.file_name}_file.yml <<'YML'
+    Config:
+      api-url: https://hub.datacommons.cancer.gov/api/graphql
+      dryrun: false
+      overwrite: false
+      retries: 3
+      submission: ${params.submission_uuid}
+      manifest: ${manifest}
+      token: \${CRDC_API_TOKEN}
+      type: data file
+    YML
+    """
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    WORKFLOW
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
 
 workflow {
-    synapse_get(ch_input)
+    ch_input \
+        | synapse_get \
+        | subset_row_without_entityid \
+        | make_config_yml
 }
