@@ -106,6 +106,33 @@ process make_config_yml {
     """
 }
 
+process crdc_upload {
+
+    tag "${meta.file_name}"
+
+    // Use Python container as base
+    container 'python:3.11-slim'
+
+    input:
+    tuple val(meta), path(files), path(config)
+
+    secret 'CRDC_API_TOKEN'
+
+    output:
+    tuple val(meta), path(files), path(config)
+
+    script:
+    """
+    set -euo pipefail
+
+    echo "Installing CRDC uploader from GitHub..."
+    pip install --quiet git+https://github.com/CBIIT/crdc-datahub-cli-uploader.git
+
+    echo "Uploading ${meta.file_name} to CRDC..."
+    crdc-uploader upload --config ${config} --file ${files}
+    """
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     WORKFLOW
@@ -116,5 +143,6 @@ workflow {
     ch_input \
         | synapse_get \
         | subset_row_without_entityid \
-        | make_config_yml
+        | make_config_yml \
+        | crdc_upload
 }
