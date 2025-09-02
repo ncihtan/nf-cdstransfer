@@ -94,12 +94,11 @@ process synapse_get {
     secret 'SYNAPSE_AUTH_TOKEN'
 
     output:
-    tuple val(meta), path("out"), emit: fetched
+    tuple val(meta), path("*")
 
     script:
-    def args = (task.ext.args ?: '').toString()       // e.g. '-r' to recurse
+    def args = task.ext.args ?: ''
     def eid  = eidOf(meta)
-    def hardTimeoutSec = (task.ext.timeout_sec ?: 1800) as int  // 30 min default
 
     """
     #!/usr/bin/env bash
@@ -113,30 +112,9 @@ process synapse_get {
 
     echo "== synapse_get =="
     echo "Entity ID: ${eid}"
-    synapse --version || true
 
-    if [ -z "\${SYNAPSE_AUTH_TOKEN:-}" ]; then
-      echo "ERROR: SYNAPSE_AUTH_TOKEN is not set" >&2
-      exit 1
-    fi
-    echo "Token length (masked): \${#SYNAPSE_AUTH_TOKEN}"
-
-    # Non-interactive login
-    synapse login -p \$SYNAPSE_AUTH_TOKEN
-
-    echo "Starting download with timeout ${hardTimeoutSec}s: synapse get ${args} ${eid} --downloadLocation ."
-    set +e
-    timeout ${hardTimeoutSec}s synapse --debug get ${args} ${eid} --downloadLocation . 2>&1 | tee synapse_debug.log
-    rc=\$?
-    set -e
-
-    if [ "\$rc" -eq 124 ]; then
-      echo "ERROR: synapse get timed out after ${hardTimeoutSec}s for ${eid}" >&2
-      exit 2
-    elif [ "\$rc" -ne 0 ]; then
-      echo "ERROR: synapse get failed (rc=\$rc) for ${eid}" >&2
-      exit 3
-    fi
+    echo "Fetching entity ${meta.entityid} from Synapse..."
+    synapse -p \$SYNAPSE_AUTH_TOKEN get $args ${eid}
 
     # Normalize filenames (spaces -> underscores)
     shopt -s nullglob
@@ -155,13 +133,6 @@ process synapse_get {
     echo "Final listing in ./out:"
     ls -lAh out || true
 
-    # Require at least one real file
-    found=\$(find out -maxdepth 1 -type f -printf '.' | wc -c)
-    if [ "\$found" -eq 0 ]; then
-      echo "ERROR: No files were downloaded for ${eid}" >&2
-      exit 4
-    fi
-
     echo "__SYNAPSE_GET_DONE__ \$(date -Is)"
     """
 
@@ -171,7 +142,6 @@ process synapse_get {
     dd if=/dev/urandom of=out/small_file.tmp bs=1M count=1 status=none
     """
 }
-
 
 /*
 ================================================================================
