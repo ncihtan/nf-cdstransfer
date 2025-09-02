@@ -117,16 +117,8 @@ process synapse_get {
 
     synapse --version || true
 
-    if [ -z "\${SYNAPSE_AUTH_TOKEN_DYP:-}" ]; then
-      echo "ERROR: SYNAPSE_AUTH_TOKEN_DYP is not set" >&2
-      exit 1
-    fi
-
-    # Non-interactive auth via token; '-p' reads from env var
-    synapse login -p "\$SYNAPSE_AUTH_TOKEN_DYP"
-
     # Download
-    synapse get ${args} ${eid}
+     synapse -p \$SYNAPSE_AUTH_TOKEN_DYP get ${args} ${eid}
 
     # Normalize: replace spaces in top-level files
     shopt -s nullglob
@@ -145,13 +137,13 @@ process synapse_get {
     echo "Final listing in ./out:"
     ls -lAh out || true
 
-    echo "__SYNAPSE_GET_DONE__ \$(date -Is)"
     """
 
     stub:
     """
-    mkdir -p out
-    dd if=/dev/urandom of=out/small_file.tmp bs=1M count=1 status=none
+    echo "Making a fake file for testing..."
+    ## Make a random file of 1MB and save to small_file.tmp
+    dd if=/dev/urandom of=small_file.tmp bs=1M count=1
     """
 }
 
