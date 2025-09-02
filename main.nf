@@ -2,9 +2,9 @@
 nextflow.enable.dsl = 2
 
 /*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+================================================================================
     PARAMETERS AND INPUTS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+================================================================================
 */
 
 include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
@@ -29,9 +29,9 @@ ch_input = Channel.fromList(
 )
 
 /*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+================================================================================
     PROCESSES
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+================================================================================
 */
 
 process synapse_get {
@@ -91,12 +91,15 @@ process make_config_yml {
     // Derive manifest name dynamically
     def manifest = "CDS_Data_Loading_v8.0.3_Stanford_Submission_${meta.file_name}_Metadata.tsv"
 
+    // Respect dry-run flag in config
+    def dryrun_value = params.dry_run ? "true" : "false"
+
     """
     cat > cli-config-${meta.file_name}_file.yml <<'YML'
     Config:
       api-url: https://hub.datacommons.cancer.gov/api/graphql
-      dryrun: false
-      overwrite: false
+      dryrun: ${dryrun_value}
+      overwrite: ${params.overwrite}
       retries: 3
       submission: ${params.submission_uuid ?: System.getenv('CRDC_SUBMISSION_ID')}
       manifest: ${manifest}
@@ -122,6 +125,9 @@ process crdc_upload {
     tuple val(meta), path(files), path(config)
 
     script:
+    // Add dry-run flag if requested
+    def dryrun_flag = params.dry_run ? "--dry-run" : ""
+
     """
     set -euo pipefail
 
@@ -129,14 +135,14 @@ process crdc_upload {
     pip install --quiet git+https://github.com/CBIIT/crdc-datahub-cli-uploader.git
 
     echo "Uploading ${meta.file_name} to CRDC..."
-    crdc-uploader upload --config ${config} --file ${files}
+    crdc-uploader upload --config ${config} --file ${files} $dryrun_flag
     """
 }
 
 /*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+================================================================================
     WORKFLOW
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+================================================================================
 */
 
 workflow {
