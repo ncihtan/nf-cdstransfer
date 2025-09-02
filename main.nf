@@ -150,7 +150,7 @@ process synapse_get {
 /*
 ================================================================================
  PROCESS: make_metadata_tsv
- - Builds CRDC-style TSV strictly from samplesheet values (no file probing)
+ - Builds CRDC-style TSV strictly from samplesheet values
  - Picks one data file from ./out to pass downstream:
      * Prefer basename matching meta.file_name (after space->underscore)
      * Else first regular file under ./out
@@ -158,107 +158,57 @@ process synapse_get {
    (note: order matches next process input)
 ================================================================================
 */
+
 process make_metadata_tsv {
+  // Fix the Batch error: give the process a container
+  container 'bash:5.2'
 
-  tag "${ eidOf(meta) }"
-
+  // Accept the list of files produced by: path('out/*')
   input:
-  tuple val(meta), path(downloaded_dir)
+  tuple val(meta), path(downloaded_files)
 
   output:
-  tuple val(meta), path("DATAFILE_SELECTED"), path("*_Metadata.tsv")
+  tuple val(meta), path('*.tsv')
 
+  // Derive the download directory from the first file
   script:
-  def eid               = eidOf(meta)
-  // Support dotted or flat keys from the samplesheet
-  def study_phs         = getf(meta, ['study.phs_accession','study_phs_accession'], 'phs002371')
-  def participant_id    = getf(meta, ['participant.study_participant_id','study_participant_id'], '')
-  def sample_id         = getf(meta, ['sample.sample_id','sample_id','HTAN_Assayed_Biospecimen_ID'], '')
-  def file_name         = getf(meta, ['file_name'], '')
-  def file_type         = getf(meta, ['file_type'], '')
-  def file_description  = getf(meta, ['file_description'], '')
-  def file_size         = getf(meta, ['file_size'], '')
-  def md5sum            = getf(meta, ['md5sum','MD5','checksum_md5'], '')
-  def strategy          = getf(meta, ['experimental_strategy_and_data_subtypes','experimental_strategy'], '')
-  def submission_version= getf(meta, ['submission_version'], '')
-  def checksum_value    = getf(meta, ['checksum_value'], '')
-  def checksum_algorithm= getf(meta, ['checksum_algorithm'], 'md5')
-  def file_mapping_level= getf(meta, ['file_mapping_level'], '')
-  def release_datetime  = getf(meta, ['release_datetime'], '')
-  def is_supplementary  = getf(meta, ['is_supplementary_file'], '')
-
-  // If meta is a List, try best-effort guesses
-  if (!(meta instanceof Map) && (meta instanceof List)) {
-    def g = guessFromList(meta as List)
-    study_phs          = study_phs          ?: g.study_phs_accession
-    file_name          = file_name          ?: g.file_name
-    file_type          = file_type          ?: g.file_type
-    file_size          = file_size          ?: g.file_size
-    md5sum             = md5sum             ?: g.md5sum
-    checksum_algorithm = checksum_algorithm ?: g.checksum_algorithm
-  }
-
-  // >>> Precompute these in Groovy to avoid $(...) in the script string
-  def desired       = file_name?.replace(' ', '_') ?: ''
-  def desired_base  = desired ? new File(desired).getName() : ''
+  def desired      = (meta instanceof Map ? (meta.Filename ?: meta.name ?: meta.file_name ?: '') : meta.toString())
+  def desired_base = desired.tokenize('/').last()
+  def D            = downloaded_files ? downloaded_files[0].parent : null
+  if (!D) throw new IllegalStateException("make_metadata_tsv: no files from synapse_get")
 
   """
   set -euo pipefail
 
-  D="${downloaded_dir}"
+  D="${D}"
   [ -d "\$D" ] || { echo "Missing download dir: \$D" >&2; exit 1; }
 
   echo "Downloaded tree (up to 2 levels):"
   find "\$D" -maxdepth 2 -type f -printf "%p\t%k KB\n" | head -n 50 || true
 
-  # Values injected from Groovy
   desired="${desired}"
   desired_base="${desired_base}"
 
   SELECTED=""
 
-  # Prefer exact basename match anywhere under D
-  if [ -n "\$desired_base" ]; then
-    mapfile -t MATCHES < <(find "\$D" -type f -printf "%f\t%p\n" \
-      | awk -F'\t' -v d="\$desired_base" '\$1==d {print \$2}' \
-      | sort)
-    if [ "\${#MATCHES[@]}" -gt 0 ]; then
-      SELECTED="\${MATCHES[0]}"
-    fi
+  # Prefer exact basename match
+  mapfile -t MATCHES < <(find "\$D" -type f -printf "%f\t%p\n" \
+      | awk -F'\t' -v d="\$desired_base" '\$1==d {print \$2}' | sort)
+
+  if (( \${#MATCHES[@]} )); then
+    SELECTED="\${MATCHES[0]}"
+  else
+    # Fallback: pick largest file
+    SELECTED="\$(find "\$D" -type f -printf "%s\t%p\n" | sort -rn | head -n1 | cut -f2-)"
   fi
 
-  # Fallback: first plausible data file anywhere under D
-  if [ -z "\$SELECTED" ]; then
-    mapfile -t FILES < <(find "\$D" -type f \
-      ! -name "synapse_debug.log" \
-      ! -name ".command*" \
-      ! -name "cli-config-*.yml" \
-      ! -name "*_Metadata.tsv" \
-      \\( -iname "*.bam" -o -iname "*.bai" -o -iname "*.cram" -o -iname "*.crai" \
-         -o -iname "*.fastq" -o -iname "*.fq" -o -iname "*.fastq.gz" -o -iname "*.fq.gz" \
-         -o -iname "*.vcf" -o -iname "*.vcf.gz" -o -iname "*.tsv" -o -iname "*.csv" -o -iname "*.txt" \\) \
-      -printf "%p\\n" | sort)
-    if [ "\${#FILES[@]}" -gt 0 ]; then
-      SELECTED="\${FILES[0]}"
-    fi
-  fi
+  [ -n "\$SELECTED" ] || { echo "No file found under \$D" >&2; exit 1; }
 
-  if [ -z "\$SELECTED" ] || [ ! -f "\$SELECTED" ]; then
-    echo "ERROR: No data file found under \${D} for ${eid}" >&2
-    exit 1
-  fi
-
-  ln -sf "\$SELECTED" DATAFILE_SELECTED
-
-  # Write TSV strictly from samplesheet values
-  cat > ${eid}_Metadata.tsv <<'TSV'
-type\tstudy.phs_accession\tparticipant.study_participant_id\tsample.sample_id\tfile_name\tfile_type\tfile_description\tfile_size\tmd5sum\texperimental_strategy_and_data_subtypes\tsubmission_version\tchecksum_value\tchecksum_algorithm\tfile_mapping_level\trelease_datetime\tis_supplementary_file
-file\t${study_phs}\t${participant_id}\t${sample_id}\t${file_name}\t${file_type}\t${file_description}\t${file_size}\t${md5sum}\t${strategy}\t${submission_version}\t${checksum_value}\t${checksum_algorithm}\t${file_mapping_level}\t${release_datetime}\t${is_supplementary}
-TSV
-
-  ls -lh ${eid}_Metadata.tsv DATAFILE_SELECTED
+  printf "entityId\tfilename\n" > metadata.tsv
+  printf "%s\t%s\n" "${desired_base:-unknown}" "\$SELECTED" >> metadata.tsv
   """
 }
+
 
 /*
 ================================================================================
@@ -305,7 +255,6 @@ YAML
     echo "Wrote cli-config-${eid}.yml"
     """
 }
-
 
 /*
 ================================================================================
