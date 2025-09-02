@@ -92,7 +92,7 @@ process synapse_get {
     input:
     val(meta)
 
-    secret 'SYNAPSE_AUTH_TOKEN'
+    secret 'SYNAPSE_AUTH_TOKEN_DYP'
 
     output:
     tuple val(meta), path('out/*')
@@ -117,13 +117,13 @@ process synapse_get {
 
     synapse --version || true
 
-    if [ -z "\${SYNAPSE_AUTH_TOKEN:-}" ]; then
-      echo "ERROR: SYNAPSE_AUTH_TOKEN is not set" >&2
+    if [ -z "\${SYNAPSE_AUTH_TOKEN_DYP:-}" ]; then
+      echo "ERROR: SYNAPSE_AUTH_TOKEN_DYP is not set" >&2
       exit 1
     fi
 
     # Non-interactive auth via token; '-p' reads from env var
-    synapse login -p "\$SYNAPSE_AUTH_TOKEN"
+    synapse login -p "\$SYNAPSE_AUTH_TOKEN_DYP"
 
     # Download
     synapse get ${args} ${eid}
