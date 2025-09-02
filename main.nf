@@ -22,3 +22,28 @@ ch_input = Channel.fromList(
     samplesheetToList(resolved_input, "assets/schema_input.json")
 )
 
+process synapse_get {
+
+    // Use a Synapse Python Client container
+    // TODO: Pin to a stable release tag when available
+    container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
+
+    // Label tasks by entityid (helps with trace/logs)
+    tag "${meta.entityid}"
+
+    input:
+    val(meta)  // Each row from samplesheet.tsv
+
+    secret 'SYNAPSE_AUTH_TOKEN'
+
+    output:
+    tuple val(meta), path('*')
+
+    script:
+    def args = task.ext.args ?: ''
+    """
+    echo "Fetching entity \${meta.entityid} from Synapse..."
+    synapse -p \$SYNAPSE_AUTH_TOKEN get $args \${meta.entityid}
+    """
+}
+
