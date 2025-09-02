@@ -34,7 +34,7 @@ process synapse_get {
     input:
     val(meta)  // Each row from samplesheet.tsv
 
-    secret 'SYNAPSE_AUTH_TOKEN'
+    secret 'SYNAPSE_AUTH_TOKEN_DYP'
 
     output:
     tuple val(meta), path('*')
