@@ -1,55 +1,60 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/samplesheet.schema.json",
-  "title": "Samplesheet Schema",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HTAN Samplesheet Schema",
+  "description": "Schema for validating HTAN/CRDC-style samplesheet.tsv input",
   "type": "array",
   "items": {
     "type": "object",
-    "required": ["entityid", "file_name"],
-    "additionalProperties": true,
     "properties": {
-      "entityid": {
-        "type": "string",
-        "pattern": "^syn\\d+$",
-        "description": "Synapse entity ID (e.g., syn123456)"
-      },
-      "entity_id": {
-        "type": "string",
-        "pattern": "^syn\\d+$",
-        "description": "Alternate header some sheets use"
-      },
-      "file_name": { "type": "string", "minLength": 1 },
-      "file_type": { "type": "string" },
-      "file_description": { "type": "string" },
-      "file_size": {
-        "oneOf": [
-          { "type": "integer", "minimum": 0 },
-          { "type": "string", "pattern": "^[0-9]+$" }
-        ]
-      },
-      "md5sum": { "type": "string", "pattern": "^[A-Fa-f0-9]{32}$" },
-      "experimental_strategy_and_data_subtypes": { "type": "string" },
-      "submission_version": { "type": "string" },
-      "checksum_value": { "type": "string" },
-      "checksum_algorithm": {
-        "type": "string",
-        "enum": ["md5", "sha1", "sha256", "sha512", "none"],
-        "default": "md5"
-      },
-      "file_mapping_level": { "type": "string" },
-      "release_datetime": {
-        "type": "string",
-        "pattern": "^\\d{4}-\\d{2}-\\d{2}([Tt ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$"
-      },
-      "is_supplementary_file": {
-        "oneOf": [
-          { "type": "boolean" },
-          { "type": "string", "enum": ["true","false","TRUE","FALSE","yes","no","YES","NO","0","1"] }
-        ]
-      },
+      "type": { "type": "string", "enum": ["file"] },
+
       "study.phs_accession": { "type": "string", "pattern": "^phs\\d{6,}$" },
-      "sample.sample_id": { "type": "string" },
-      "participant.study_participant_id": { "type": "string" }
-    }
+
+      "participant.study_participant_id": { "type": ["string", "null"] },
+
+      "sample.sample_id": { "type": ["string", "null"] },
+
+      "file_name": { "type": "string" },
+
+      "file_type": { 
+        "type": "string",
+        "enum": ["BAM", "FASTQ", "TSV", "CSV", "CRAM", "VCF", "TXT"]
+      },
+
+      "file_description": { "type": ["string", "null"] },
+
+      "file_size": { "type": ["integer", "number", "null"] },
+
+      "md5sum": { "type": "string", "pattern": "^[a-fA-F0-9]{32}$" },
+
+      "experimental_strategy_and_data_subtypes": { "type": ["string", "null"] },
+
+      "submission_version": { "type": ["string", "number", "null"] },
+
+      "checksum_value": { "type": ["string", "null"] },
+
+      "checksum_algorithm": { 
+        "type": ["string", "null"],
+        "enum": ["md5", "sha1", "sha256", null]
+      },
+
+      "file_mapping_level": { "type": ["string", "null"] },
+
+      "release_datetime": { "type": ["string", "null"], "format": "date-time" },
+
+      "is_supplementary_file": { "type": ["boolean", "string", "null"] },
+
+      "entityid": { "type": "string", "pattern": "^syn\\d+$" }
+    },
+    "required": [
+      "type",
+      "study.phs_accession",
+      "file_name",
+      "file_type",
+      "file_size",
+      "md5sum",
+      "entityid"
+    ],
+    "additionalProperties": true
   }
 }
