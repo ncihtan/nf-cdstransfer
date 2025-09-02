@@ -95,7 +95,7 @@ process synapse_get {
     secret 'SYNAPSE_AUTH_TOKEN_DYP'
 
     output:
-    tuple val(meta), path('out/*')
+    tuple val(meta), path("out") 
 
     script:
     def args = task.ext.args ?: ''
@@ -160,46 +160,96 @@ process synapse_get {
 */
 
 process make_metadata_tsv {
-  container 'ubuntu:22.04'
+
+  tag "${ eidOf(meta) }"
 
   input:
-  tuple val(meta), path(downloaded_files)   // works with synapse_get: path('out/*')
+  tuple val(meta), path(downloaded_dir)          // <-- directory
 
   output:
-  tuple val(meta), path('*.tsv')
+  tuple val(meta), path("DATAFILE_SELECTED"), path("*_Metadata.tsv")
 
   script:
-  def desired      = (meta instanceof Map ? (meta.Filename ?: meta.name ?: meta.file_name ?: '') : meta.toString())
-  def desired_base = desired.tokenize('/').last()
-  def D            = downloaded_files ? downloaded_files[0].parent : null
-  if (!D) throw new IllegalStateException("make_metadata_tsv: no files from synapse_get")
+  def eid               = eidOf(meta)
+  // Samplesheet fields (same as before)...
+  def study_phs         = getf(meta, ['study.phs_accession','study_phs_accession'], 'phs002371')
+  def participant_id    = getf(meta, ['participant.study_participant_id','study_participant_id'], '')
+  def sample_id         = getf(meta, ['sample.sample_id','sample_id','HTAN_Assayed_Biospecimen_ID'], '')
+  def file_name         = getf(meta, ['file_name','Filename','name'], '')
+  def file_type         = getf(meta, ['file_type'], '')
+  def file_description  = getf(meta, ['file_description'], '')
+  def file_size         = getf(meta, ['file_size'], '')
+  def md5sum            = getf(meta, ['md5sum','MD5','checksum_md5'], '')
+  def strategy          = getf(meta, ['experimental_strategy_and_data_subtypes','experimental_strategy'], '')
+  def submission_version= getf(meta, ['submission_version'], '')
+  def checksum_value    = getf(meta, ['checksum_value'], '')
+  def checksum_algorithm= getf(meta, ['checksum_algorithm'], 'md5')
+  def file_mapping_level= getf(meta, ['file_mapping_level'], '')
+  def release_datetime  = getf(meta, ['release_datetime'], '')
+  def is_supplementary  = getf(meta, ['is_supplementary_file'], '')
+
+  if (!(meta instanceof Map) && (meta instanceof List)) {
+    def g = guessFromList(meta as List)
+    study_phs          = study_phs          ?: g.study_phs_accession
+    file_name          = file_name          ?: g.file_name
+    file_type          = file_type          ?: g.file_type
+    file_size          = file_size          ?: g.file_size
+    md5sum             = md5sum             ?: g.md5sum
+    checksum_algorithm = checksum_algorithm ?: g.checksum_algorithm
+  }
+
+  def desired      = (file_name ?: '').replace(' ','_')
+  def desired_base = desired ? new File(desired).getName() : ''
 
   """
   set -euo pipefail
 
-  D="${D}"
-  [ -d "\$D" ] || { echo "Missing download dir: \$D" >&2; exit 1; }
+  D="${downloaded_dir}"
+  if [ ! -d "\$D" ]; then
+    echo "Missing download dir from synapse_get: \$D" >&2
+    exit 1
+  fi
 
   echo "Downloaded tree (up to 2 levels):"
   find "\$D" -maxdepth 2 -type f -printf "%p\t%k KB\n" | head -n 50 || true
 
-  desired="${desired}"
   desired_base="${desired_base}"
 
+  # Prefer an exact basename match anywhere under D
   SELECTED=""
-  mapfile -t MATCHES < <(find "\$D" -type f -printf "%f\t%p\n" \
+  if [ -n "\$desired_base" ]; then
+    mapfile -t MATCHES < <(find "\$D" -type f -printf "%f\t%p\n" \
       | awk -F'\t' -v d="\$desired_base" '\$1==d {print \$2}' | sort)
-  if (( \${#MATCHES[@]} )); then
-    SELECTED="\${MATCHES[0]}"
-  else
-    SELECTED="\$(find "\$D" -type f -printf "%s\t%p\n" | sort -rn | head -n1 | cut -f2-)"
+    if (( \${#MATCHES[@]} )); then
+      SELECTED="\${MATCHES[0]}"
+    fi
   fi
-  [ -n "\$SELECTED" ] || { echo "No file found under \$D" >&2; exit 1; }
 
-  printf "entityId\tfilename\n" > metadata.tsv
-  printf "%s\t%s\n" "${desired_base:-unknown}" "\$SELECTED" >> metadata.tsv
+  # Fallback: largest plausible data file under D
+  if [ -z "\$SELECTED" ]; then
+    SELECTED="\$(find "\$D" -type f \
+      ! -name "synapse_debug.log" ! -name ".command*" ! -name "*_Metadata.tsv" ! -name "cli-config-*.yml" \
+      \\( -iname "*.bam" -o -iname "*.bai" -o -iname "*.cram" -o -iname "*.crai" \
+         -o -iname "*.fastq" -o -iname "*.fq" -o -iname "*.fastq.gz" -o -iname "*.fq.gz" \
+         -o -iname "*.vcf" -o -iname "*.vcf.gz" -o -iname "*.tsv" -o -iname "*.csv" -o -iname "*.txt" \\) \
+      -printf "%s\t%p\n" | sort -rn | head -n1 | cut -f2-)"
+  fi
+
+  [ -n "\$SELECTED" ] && [ -f "\$SELECTED" ] || { echo "ERROR: No data file found under \$D for ${eid}" >&2; exit 1; }
+
+  # Stable symlink for downstream binding
+  ln -sf "\$SELECTED" DATAFILE_SELECTED
+
+  # Write TSV strictly from samplesheet values
+  cat > ${eid}_Metadata.tsv <<'TSV'
+type\tstudy.phs_accession\tparticipant.study_participant_id\tsample.sample_id\tfile_name\tfile_type\tfile_description\tfile_size\tmd5sum\texperimental_strategy_and_data_subtypes\tsubmission_version\tchecksum_value\tchecksum_algorithm\tfile_mapping_level\trelease_datetime\tis_supplementary_file
+file\t${study_phs}\t${participant_id}\t${sample_id}\t${file_name}\t${file_type}\t${file_description}\t${file_size}\t${md5sum}\t${strategy}\t${submission_version}\t${checksum_value}\t${checksum_algorithm}\t${file_mapping_level}\t${release_datetime}\t${is_supplementary}
+TSV
+
+  ls -lh ${eid}_Metadata.tsv DATAFILE_SELECTED
   """
 }
+
 
 /*
 ================================================================================
@@ -322,15 +372,11 @@ process crdc_upload {
 ================================================================================
 */
 workflow {
+  ch_dl   = synapse_get( ch_input )             // (meta, out/)
+  ch_meta = make_metadata_tsv( ch_dl )          // (meta, DATAFILE_SELECTED, *_Metadata.tsv)
+  ch_cfg  = make_uploader_config( ch_meta )
+  ch_up   = crdc_upload( ch_cfg )
 
-  // Prefer function-style process invocation for clarity & correctness
-  ch_dl   = synapse_get( ch_input )               // (meta, out/)
-  ch_meta = make_metadata_tsv( ch_dl )            // (meta, DATAFILE_SELECTED, *_Metadata.tsv)
-  ch_cfg  = make_uploader_config( ch_meta )       // (meta, DATAFILE_SELECTED, cli-config-*.yml)
-  ch_up   = crdc_upload( ch_cfg )                 // (meta, upload.log)
-
-  // Visibility
   ch_meta.view { meta, datafile, tsv -> "METADATA:\t${eidOf(meta)}\t${tsv}\t->\t${datafile}" }
-  ch_cfg.view  { meta, datafile, yml -> "CONFIG:\t${eidOf(meta)}\t${yml}" }
-  ch_up.view   { meta, log -> "UPLOAD:\t${eidOf(meta)}\t${log}" }
 }
+
