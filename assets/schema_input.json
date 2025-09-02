@@ -1,16 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "HTAN Samplesheet Schema",
-  "description": "Schema for validating HTAN/CRDC-style samplesheet.tsv input",
+  "$id": "https://example.com/samplesheet.schema.json",
+  "title": "CRDC Uploader Samplesheet Schema",
+  "description": "Schema for validating rows in samplesheet.tsv for the CRDC uploader pipeline.",
   "type": "array",
   "items": {
     "type": "object",
     "properties": {
       "type": { "type": "string", "enum": ["file"] },
 
-      "study.phs_accession": { 
-        "type": "string", 
-        "pattern": "^phs\\d{6,}$" 
+      "study.phs_accession": {
+        "type": "string",
+        "pattern": "^phs\\d{6,}$"
       },
 
       "participant.study_participant_id": { "type": ["string", "null"] },
@@ -19,7 +20,7 @@
 
       "file_name": { "type": "string" },
 
-      "file_type": { 
+      "file_type": {
         "type": "string",
         "enum": ["BAM", "FASTQ", "TSV", "CSV", "CRAM", "VCF", "TXT"]
       },
@@ -28,9 +29,9 @@
 
       "file_size": { "type": ["integer", "number", "string", "null"] },
 
-      "md5sum": { 
-        "type": "string", 
-        "pattern": "^[a-fA-F0-9]{32}$" 
+      "md5sum": {
+        "type": "string",
+        "pattern": "^[a-fA-F0-9]{32}$"
       },
 
       "experimental_strategy_and_data_subtypes": { "type": ["string", "null"] },
@@ -39,7 +40,7 @@
 
       "checksum_value": { "type": ["string", "null"] },
 
-      "checksum_algorithm": { 
+      "checksum_algorithm": {
         "type": ["string", "null"],
         "enum": ["md5", "sha1", "sha256", null]
       },
@@ -50,9 +51,9 @@
 
       "is_supplementary_file": { "type": ["boolean", "string", "null"] },
 
-      "entityid": { 
-        "type": "string", 
-        "pattern": "^syn\\d+$" 
+      "entityid": {
+        "type": "string",
+        "pattern": "^syn\\d+$"
       }
     },
     "required": [
