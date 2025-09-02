@@ -23,10 +23,25 @@ def resolved_input = _isUrl ? _raw
 // Validate pipeline params
 validateParameters()
 
-// Build channel of meta rows from TSV samplesheet
+// headers must match your TSV
+def headers = [
+  "type", "study.phs_accession", "participant.study_participant_id",
+  "sample.sample_id", "file_name", "file_type", "file_description",
+  "file_size", "md5sum", "experimental_strategy_and_data_subtypes",
+  "submission_version", "checksum_value", "checksum_algorithm",
+  "file_mapping_level", "release_datetime", "is_supplementary_file", "entityid"
+]
+
 ch_input = Channel.fromList(
     samplesheetToList(resolved_input, "assets/schema_input.json")
-)
+).map { row ->
+    if (row instanceof List) {
+        return headers.collectEntries { h -> [h, row[headers.indexOf(h)]] }
+    } else {
+        return row
+    }
+}
+
 
 /*
 ================================================================================
