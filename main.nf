@@ -205,26 +205,53 @@ process make_metadata_tsv {
 
     # Work under the staged download directory
     D="${downloaded_dir}"
-    [ -d "\$D" ] || { echo "Missing download dir: \$D" >&2; exit 1; }
-
-    # Choose a data file to pass on (prefer exact match; else first)
+    [ -d "$D" ] || { echo "Missing download dir: $D" >&2; exit 1; }
+    
+    # Show what we actually have (2 levels, first 50 files)
+    echo "Downloaded tree (up to 2 levels):"
+    find "$D" -maxdepth 2 -type f -printf "%p\t%k KB\n" | head -n 50 || true
+    
+    # Prefer an exact basename match to meta.file_name (spaces -> underscores)
+    desired="$(printf "%s" "${file_name}" | tr ' ' '_')"
+    desired_base="$(basename -- "$desired")"
+    
     SELECTED=""
-    if [ -n "${desired}" ] && [ -f "\$D/${desired}" ]; then
-      SELECTED="\$D/${desired}"
-    else
-      mapfile -t FILES < <(find "\$D" -maxdepth 1 -type f -printf "%f\\n" | sort)
-      if [ "\${#FILES[@]}" -gt 0 ]; then
-        SELECTED="\$D/\${FILES[0]}"
+    
+    if [ -n "$desired_base" ]; then
+      # Find files anywhere under D whose BASENAME equals desired_base (case-sensitive)
+      # Use -printf "%f\t%p" to compare basenames reliably
+      mapfile -t MATCHES < <(find "$D" -type f -printf "%f\t%p\n" \
+        | awk -F'\t' -v d="$desired_base" '$1==d {print $2}' \
+        | sort)
+      if [ "${#MATCHES[@]}" -gt 0 ]; then
+        SELECTED="${MATCHES[0]}"
       fi
     fi
-
-    if [ -z "\$SELECTED" ] || [ ! -f "\$SELECTED" ]; then
-      echo "ERROR: No data file found for ${eid}" >&2
+    
+    # Fallback: first plausible data file anywhere under D
+    if [ -z "$SELECTED" ]; then
+      # Adjust this glob as needed; keep logs/aux out
+      mapfile -t FILES < <(find "$D" -type f \
+        ! -name "synapse_debug.log" \
+        ! -name ".command*" \
+        ! -name "cli-config-*.yml" \
+        ! -name "*_Metadata.tsv" \
+        \( -iname "*.bam" -o -iname "*.bai" -o -iname "*.cram" -o -iname "*.crai" \
+           -o -iname "*.fastq" -o -iname "*.fq" -o -iname "*.fastq.gz" -o -iname "*.fq.gz" \
+           -o -iname "*.vcf" -o -iname "*.vcf.gz" -o -iname "*.tsv" -o -iname "*.csv" -o -iname "*.txt" \) \
+        -printf "%p\n" | sort)
+      if [ "${#FILES[@]}" -gt 0 ]; then
+        SELECTED="${FILES[0]}"
+      fi
+    fi
+    
+    if [ -z "$SELECTED" ] || [ ! -f "$SELECTED" ]; then
+      echo "ERROR: No data file found under ${D} for ${eid}" >&2
       exit 1
     fi
-
+    
     # Expose selected data file under a stable name for downstream binding
-    ln -sf "\$SELECTED" DATAFILE_SELECTED
+    ln -sf "$SELECTED" DATAFILE_SELECTED
 
     # Write TSV strictly from samplesheet values
     cat > ${eid}_Metadata.tsv <<'TSV'
@@ -235,7 +262,6 @@ TSV
     ls -lh ${eid}_Metadata.tsv DATAFILE_SELECTED
     """
 }
-
 
 /*
 ================================================================================
