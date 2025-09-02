@@ -160,107 +160,104 @@ process synapse_get {
 */
 process make_metadata_tsv {
 
-    tag "${ eidOf(meta) }"
+  tag "${ eidOf(meta) }"
 
-    input:
-    tuple val(meta), path(downloaded_dir)
+  input:
+  tuple val(meta), path(downloaded_dir)
 
-    output:
-    tuple val(meta), path("DATAFILE_SELECTED"), path("*_Metadata.tsv")
+  output:
+  tuple val(meta), path("DATAFILE_SELECTED"), path("*_Metadata.tsv")
 
-    script:
-    def eid               = eidOf(meta)
-    // Support dotted or flat keys from the samplesheet
-    def study_phs         = getf(meta, ['study.phs_accession','study_phs_accession'], 'phs002371')
-    def participant_id    = getf(meta, ['participant.study_participant_id','study_participant_id'], '')
-    def sample_id         = getf(meta, ['sample.sample_id','sample_id','HTAN_Assayed_Biospecimen_ID'], '')
-    def file_name         = getf(meta, ['file_name'], '')
-    def file_type         = getf(meta, ['file_type'], '')
-    def file_description  = getf(meta, ['file_description'], '')
-    def file_size         = getf(meta, ['file_size'], '')
-    def md5sum            = getf(meta, ['md5sum','MD5','checksum_md5'], '')
-    def strategy          = getf(meta, ['experimental_strategy_and_data_subtypes','experimental_strategy'], '')
-    def submission_version= getf(meta, ['submission_version'], '')
-    def checksum_value    = getf(meta, ['checksum_value'], '')
-    def checksum_algorithm= getf(meta, ['checksum_algorithm'], 'md5')
-    def file_mapping_level= getf(meta, ['file_mapping_level'], '')
-    def release_datetime  = getf(meta, ['release_datetime'], '')
-    def is_supplementary  = getf(meta, ['is_supplementary_file'], '')
+  script:
+  def eid               = eidOf(meta)
+  // Support dotted or flat keys from the samplesheet
+  def study_phs         = getf(meta, ['study.phs_accession','study_phs_accession'], 'phs002371')
+  def participant_id    = getf(meta, ['participant.study_participant_id','study_participant_id'], '')
+  def sample_id         = getf(meta, ['sample.sample_id','sample_id','HTAN_Assayed_Biospecimen_ID'], '')
+  def file_name         = getf(meta, ['file_name'], '')
+  def file_type         = getf(meta, ['file_type'], '')
+  def file_description  = getf(meta, ['file_description'], '')
+  def file_size         = getf(meta, ['file_size'], '')
+  def md5sum            = getf(meta, ['md5sum','MD5','checksum_md5'], '')
+  def strategy          = getf(meta, ['experimental_strategy_and_data_subtypes','experimental_strategy'], '')
+  def submission_version= getf(meta, ['submission_version'], '')
+  def checksum_value    = getf(meta, ['checksum_value'], '')
+  def checksum_algorithm= getf(meta, ['checksum_algorithm'], 'md5')
+  def file_mapping_level= getf(meta, ['file_mapping_level'], '')
+  def release_datetime  = getf(meta, ['release_datetime'], '')
+  def is_supplementary  = getf(meta, ['is_supplementary_file'], '')
 
-    // If meta is a List, try a best-effort guess to avoid blanks
-    if (!(meta instanceof Map) && (meta instanceof List)) {
-      def g = guessFromList(meta as List)
-      study_phs          = study_phs          ?: g.study_phs_accession
-      file_name          = file_name          ?: g.file_name
-      file_type          = file_type          ?: g.file_type
-      file_size          = file_size          ?: g.file_size
-      md5sum             = md5sum             ?: g.md5sum
-      checksum_algorithm = checksum_algorithm ?: g.checksum_algorithm
-    }
+  // If meta is a List, try best-effort guesses
+  if (!(meta instanceof Map) && (meta instanceof List)) {
+    def g = guessFromList(meta as List)
+    study_phs          = study_phs          ?: g.study_phs_accession
+    file_name          = file_name          ?: g.file_name
+    file_type          = file_type          ?: g.file_type
+    file_size          = file_size          ?: g.file_size
+    md5sum             = md5sum             ?: g.md5sum
+    checksum_algorithm = checksum_algorithm ?: g.checksum_algorithm
+  }
 
-    def desired = file_name?.replace(' ', '_') ?: ''
+  // >>> Precompute these in Groovy to avoid $(...) in the script string
+  def desired       = file_name?.replace(' ', '_') ?: ''
+  def desired_base  = desired ? new File(desired).getName() : ''
 
-    """
-    set -euo pipefail
+  """
+  set -euo pipefail
 
-    # Work under the staged download directory
-    D="${downloaded_dir}"
-    [ -d "$D" ] || { echo "Missing download dir: $D" >&2; exit 1; }
-    
-    # Show what we actually have (2 levels, first 50 files)
-    echo "Downloaded tree (up to 2 levels):"
-    find "$D" -maxdepth 2 -type f -printf "%p\t%k KB\n" | head -n 50 || true
-    
-    # Prefer an exact basename match to meta.file_name (spaces -> underscores)
-    desired="$(printf "%s" "${file_name}" | tr ' ' '_')"
-    desired_base="$(basename -- "$desired")"
-    
-    SELECTED=""
-    
-    if [ -n "$desired_base" ]; then
-      # Find files anywhere under D whose BASENAME equals desired_base (case-sensitive)
-      # Use -printf "%f\t%p" to compare basenames reliably
-      mapfile -t MATCHES < <(find "$D" -type f -printf "%f\t%p\n" \
-        | awk -F'\t' -v d="$desired_base" '$1==d {print $2}' \
-        | sort)
-      if [ "${#MATCHES[@]}" -gt 0 ]; then
-        SELECTED="${MATCHES[0]}"
-      fi
+  D="${downloaded_dir}"
+  [ -d "\$D" ] || { echo "Missing download dir: \$D" >&2; exit 1; }
+
+  echo "Downloaded tree (up to 2 levels):"
+  find "\$D" -maxdepth 2 -type f -printf "%p\t%k KB\n" | head -n 50 || true
+
+  # Values injected from Groovy
+  desired="${desired}"
+  desired_base="${desired_base}"
+
+  SELECTED=""
+
+  # Prefer exact basename match anywhere under D
+  if [ -n "\$desired_base" ]; then
+    mapfile -t MATCHES < <(find "\$D" -type f -printf "%f\t%p\n" \
+      | awk -F'\t' -v d="\$desired_base" '\$1==d {print \$2}' \
+      | sort)
+    if [ "\${#MATCHES[@]}" -gt 0 ]; then
+      SELECTED="\${MATCHES[0]}"
     fi
-    
-    # Fallback: first plausible data file anywhere under D
-    if [ -z "$SELECTED" ]; then
-      # Adjust this glob as needed; keep logs/aux out
-      mapfile -t FILES < <(find "$D" -type f \
-        ! -name "synapse_debug.log" \
-        ! -name ".command*" \
-        ! -name "cli-config-*.yml" \
-        ! -name "*_Metadata.tsv" \
-        \( -iname "*.bam" -o -iname "*.bai" -o -iname "*.cram" -o -iname "*.crai" \
-           -o -iname "*.fastq" -o -iname "*.fq" -o -iname "*.fastq.gz" -o -iname "*.fq.gz" \
-           -o -iname "*.vcf" -o -iname "*.vcf.gz" -o -iname "*.tsv" -o -iname "*.csv" -o -iname "*.txt" \) \
-        -printf "%p\n" | sort)
-      if [ "${#FILES[@]}" -gt 0 ]; then
-        SELECTED="${FILES[0]}"
-      fi
-    fi
-    
-    if [ -z "$SELECTED" ] || [ ! -f "$SELECTED" ]; then
-      echo "ERROR: No data file found under ${D} for ${eid}" >&2
-      exit 1
-    fi
-    
-    # Expose selected data file under a stable name for downstream binding
-    ln -sf "$SELECTED" DATAFILE_SELECTED
+  fi
 
-    # Write TSV strictly from samplesheet values
-    cat > ${eid}_Metadata.tsv <<'TSV'
-type	study.phs_accession	participant.study_participant_id	sample.sample_id	file_name	file_type	file_description	file_size	md5sum	experimental_strategy_and_data_subtypes	submission_version	checksum_value	checksum_algorithm	file_mapping_level	release_datetime	is_supplementary_file
-file	${study_phs}	${participant_id}	${sample_id}	${file_name}	${file_type}	${file_description}	${file_size}	${md5sum}	${strategy}	${submission_version}	${checksum_value}	${checksum_algorithm}	${file_mapping_level}	${release_datetime}	${is_supplementary}
+  # Fallback: first plausible data file anywhere under D
+  if [ -z "\$SELECTED" ]; then
+    mapfile -t FILES < <(find "\$D" -type f \
+      ! -name "synapse_debug.log" \
+      ! -name ".command*" \
+      ! -name "cli-config-*.yml" \
+      ! -name "*_Metadata.tsv" \
+      \\( -iname "*.bam" -o -iname "*.bai" -o -iname "*.cram" -o -iname "*.crai" \
+         -o -iname "*.fastq" -o -iname "*.fq" -o -iname "*.fastq.gz" -o -iname "*.fq.gz" \
+         -o -iname "*.vcf" -o -iname "*.vcf.gz" -o -iname "*.tsv" -o -iname "*.csv" -o -iname "*.txt" \\) \
+      -printf "%p\\n" | sort)
+    if [ "\${#FILES[@]}" -gt 0 ]; then
+      SELECTED="\${FILES[0]}"
+    fi
+  fi
+
+  if [ -z "\$SELECTED" ] || [ ! -f "\$SELECTED" ]; then
+    echo "ERROR: No data file found under \${D} for ${eid}" >&2
+    exit 1
+  fi
+
+  ln -sf "\$SELECTED" DATAFILE_SELECTED
+
+  # Write TSV strictly from samplesheet values
+  cat > ${eid}_Metadata.tsv <<'TSV'
+type\tstudy.phs_accession\tparticipant.study_participant_id\tsample.sample_id\tfile_name\tfile_type\tfile_description\tfile_size\tmd5sum\texperimental_strategy_and_data_subtypes\tsubmission_version\tchecksum_value\tchecksum_algorithm\tfile_mapping_level\trelease_datetime\tis_supplementary_file
+file\t${study_phs}\t${participant_id}\t${sample_id}\t${file_name}\t${file_type}\t${file_description}\t${file_size}\t${md5sum}\t${strategy}\t${submission_version}\t${checksum_value}\t${checksum_algorithm}\t${file_mapping_level}\t${release_datetime}\t${is_supplementary}
 TSV
 
-    ls -lh ${eid}_Metadata.tsv DATAFILE_SELECTED
-    """
+  ls -lh ${eid}_Metadata.tsv DATAFILE_SELECTED
+  """
 }
 
 /*
