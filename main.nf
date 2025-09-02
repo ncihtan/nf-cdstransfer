@@ -122,7 +122,7 @@ process synapse_get {
     echo "Token length (masked): \${#SYNAPSE_AUTH_TOKEN}"
 
     # Non-interactive login
-    synapse login --silent --authToken "\$SYNAPSE_AUTH_TOKEN"
+    synapse login -p \$SYNAPSE_AUTH_TOKEN
 
     echo "Starting download with timeout ${hardTimeoutSec}s: synapse get ${args} ${eid} --downloadLocation ."
     set +e
