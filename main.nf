@@ -36,7 +36,6 @@ ch_input = Channel.fromList(
 
 process synapse_get {
 
-    // Synapse Python Client container
     container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
 
     tag "${meta.entityid}"
@@ -44,7 +43,6 @@ process synapse_get {
     input:
     val(meta)
 
-    // Use your custom secret
     secret 'SYNAPSE_AUTH_TOKEN_DYP'
 
     output:
@@ -69,10 +67,8 @@ process subset_row_without_entityid {
     tuple val(clean_meta), path(files)
 
     script:
-    // Strip out 'entityid' key from this row (meta Map)
     def clean_meta = meta.findAll { k, v -> k != 'entityid' }
     """
-    # Nothing to change in the files, just forwarding
     echo "Subset row for \${meta.file_name}, dropped entityid"
     """
 }
@@ -82,16 +78,12 @@ process make_config_yml {
     tag "${meta.file_name}"
 
     input:
-    tuple val(meta), path(files)
+    tuple val(meta), path(files), path(global_tsv)
 
     output:
-    tuple val(meta), path("cli-config-*_file.yml")
+    tuple val(meta), path(files), path("cli-config-*_file.yml"), path(global_tsv)
 
     script:
-    // Derive manifest name dynamically
-    def manifest = "CDS_Data_Loading_v8.0.3_Stanford_Submission_${meta.file_name}_Metadata.tsv"
-
-    // Respect dry-run flag in config
     def dryrun_value = params.dry_run ? "true" : "false"
 
     """
@@ -102,10 +94,31 @@ process make_config_yml {
       overwrite: ${params.overwrite}
       retries: 3
       submission: ${params.submission_uuid ?: System.getenv('CRDC_SUBMISSION_ID')}
-      manifest: ${manifest}
+      manifest: samplesheet_no_entityid.tsv
       token: \${CRDC_API_TOKEN}
       type: data file
     YML
+    """
+}
+
+process write_clean_tsv {
+
+    publishDir "results", mode: 'copy'
+
+    input:
+    val(all_meta)
+
+    output:
+    path("samplesheet_no_entityid.tsv")
+
+    script:
+    """
+    python3 - <<'PYCODE'
+    import pandas as pd
+    rows = ${all_meta}
+    df = pd.DataFrame(rows)
+    df.to_csv("samplesheet_no_entityid.tsv", sep="\\t", index=False)
+    PYCODE
     """
 }
 
@@ -113,19 +126,17 @@ process crdc_upload {
 
     tag "${meta.file_name}"
 
-    // Use Python container as base
     container 'python:3.11-slim'
 
     input:
-    tuple val(meta), path(files), path(config)
+    tuple val(meta), path(files), path(config), path(global_tsv)
 
     secret 'CRDC_API_TOKEN'
 
     output:
-    tuple val(meta), path(files), path(config)
+    tuple val(meta), path(files), path(config), path(global_tsv)
 
     script:
-    // Add dry-run flag if requested
     def dryrun_flag = params.dry_run ? "--dry-run" : ""
 
     """
@@ -135,7 +146,7 @@ process crdc_upload {
     pip install --quiet git+https://github.com/CBIIT/crdc-datahub-cli-uploader.git
 
     echo "Uploading ${meta.file_name} to CRDC..."
-    crdc-uploader upload --config ${config} --file ${files} $dryrun_flag
+    python3 -m uploader --config ${config} $dryrun_flag
     """
 }
 
@@ -146,9 +157,25 @@ process crdc_upload {
 */
 
 workflow {
-    ch_input \
+
+    // Step 1: download and clean rows
+    cleaned = ch_input \
         | synapse_get \
-        | subset_row_without_entityid \
-        | make_config_yml \
-        | crdc_upload
+        | subset_row_without_entityid
+
+    // Step 2: collect all cleaned meta into one TSV
+    cleaned.map { meta, files -> meta }
+        .collect()
+        .set { all_meta }
+
+    global_tsv = write_clean_tsv(all_meta).out
+
+    // Step 3: add YAML configs referencing the global TSV
+    with_yaml = cleaned
+        .combine(global_tsv)
+        | make_config_yml
+
+    // Step 4: upload each file using its YAML + global TSV
+    crdc_upload(with_yaml)
 }
+
