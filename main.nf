@@ -95,7 +95,7 @@ process synapse_get {
     secret 'SYNAPSE_AUTH_TOKEN_DYP'
 
     output:
-    tuple val(meta), path("out") 
+    tuple val(meta), path('out/*')
 
     script:
     def args = task.ext.args ?: ''
