@@ -123,12 +123,6 @@ process synapse_get {
     fi
     echo "Token length (masked): \${#SYNAPSE_AUTH_TOKEN}"
 
-    # Quick egress probe
-    if ! curl -fsSI --max-time 10 https://www.synapse.org >/dev/null; then
-      echo "ERROR: Network/egress check to synapse.org failed" >&2
-      exit 1
-    fi
-
     # Non-interactive login
     synapse login --silent --authToken "\$SYNAPSE_AUTH_TOKEN"
 
@@ -140,41 +134,6 @@ process synapse_get {
     start_ts=\$(date +%s)
     last_bytes=-1
     stagnant_cnt=0
-
-    # Heartbeat & progress loop
-    while kill -0 "\$DL_PID" 2>/dev/null; do
-      now=\$(date +%s)
-      elapsed=\$(( now - start_ts ))
-      # Sum sizes of any regular files in CWD (excluding our own logs) + cache dir
-      cwd_bytes=\$(find . -maxdepth 1 -type f ! -name "synapse_debug.log" ! -name ".command*" -printf "%s\\n" | awk '{s+=\$1} END{print s+0}')
-      cache_bytes=\$(find "\$SYNAPSE_CACHE_DIR" -type f -printf "%s\\n" 2>/dev/null | awk '{s+=\$1} END{print s+0}')
-      total_bytes=\$(( cwd_bytes + cache_bytes ))
-      echo "heartbeat elapsed=\${elapsed}s total_bytes=\${total_bytes} cwd=\${cwd_bytes} cache=\${cache_bytes} \$(date -Is)"
-
-      # detect no growth
-      if [ "\$total_bytes" -eq "\$last_bytes" ]; then
-        stagnant_cnt=\$(( stagnant_cnt + 1 ))
-      else
-        stagnant_cnt=0
-        last_bytes=\$total_bytes
-      fi
-
-      # Hard timeout
-      if [ "\$elapsed" -ge ${hardTimeoutSec} ]; then
-        echo "ERROR: Download exceeded ${hardTimeoutSec}s; killing synapse get" >&2
-        kill "\$DL_PID" 2>/dev/null || true
-        sleep 2
-        kill -9 "\$DL_PID" 2>/dev/null || true
-        exit 124
-      fi
-
-      sleep 15
-    done
-
-    wait "\$DL_PID" || { echo "ERROR: synapse get exited with non-zero status" >&2; exit 2; }
-
-    echo "Listing after download:"
-    ls -lAh || true
 
     # Normalize filenames (spaces -> underscores)
     shopt -s nullglob
