@@ -46,7 +46,7 @@ def getf = { m, List<String> keys, def defval = '' ->
   (m instanceof Map) ? (keys.findResult { k -> m.containsKey(k) && m[k] != null && m[k].toString().trim() ? m[k] : null } ?: defval) : defval
 }
 
-// Heuristic guesses when a row is a List (best-effort only)
+//  Guesses when a row is a List (best-effort only)
 def guessFromList = { List row ->
   def firstMatch = { Closure<Boolean> pred -> row.find { it instanceof CharSequence && pred(it as CharSequence) } ?: '' }
   def isMd5      = { CharSequence s -> s ==~ /(?i)^[a-f0-9]{32}$/ }
@@ -78,9 +78,9 @@ def guessFromList = { List row ->
 ================================================================================
  PROCESS: synapse_get
  - Non-interactive token login (no prompts)
- - Network probe & 30-min timeout on download
- - Clear DONE marker + hard check at least one file was fetched
- - Emits: tuple val(meta), path('*')
+ - Hard timeout on download
+ - Groups all fetched files into ./out and emits that directory
+ - Emits: tuple val(meta), path("out")  (directory)
 ================================================================================
 */
 process synapse_get {
@@ -94,14 +94,12 @@ process synapse_get {
     secret 'SYNAPSE_AUTH_TOKEN'
 
     output:
-    tuple val(meta), path('*')
+    tuple val(meta), path("out"), emit: fetched
 
     script:
-    // allow folder recursion via `-process.ext.args='-r'`
-    def args = (task.ext.args ?: '').toString()
+    def args = (task.ext.args ?: '').toString()       // e.g. '-r' to recurse
     def eid  = eidOf(meta)
-    // shorten / extend this as you like
-    def hardTimeoutSec = task.ext.timeout_sec ?: 600  // 10 min
+    def hardTimeoutSec = (task.ext.timeout_sec ?: 1800) as int  // 30 min default
 
     """
     #!/usr/bin/env bash
@@ -111,7 +109,7 @@ process synapse_get {
     export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
     export HOME="\$PWD"                 # make synapse config/cache local
     export SYNAPSE_CACHE_DIR="\$PWD/.synapseCache"
-    mkdir -p "\$SYNAPSE_CACHE_DIR"
+    mkdir -p "\$SYNAPSE_CACHE_DIR" out
 
     echo "== synapse_get =="
     echo "Entity ID: ${eid}"
@@ -126,36 +124,51 @@ process synapse_get {
     # Non-interactive login
     synapse login --silent --authToken "\$SYNAPSE_AUTH_TOKEN"
 
-    echo "Starting download (timeout: ${hardTimeoutSec}s): synapse get ${args} ${eid} --downloadLocation ."
-    # Run download in background and capture PID; also tee debug log
-    ( synapse --debug get ${args} ${eid} --downloadLocation . 2>&1 | tee synapse_debug.log ) &
-    DL_PID=\$!
+    echo "Starting download with timeout ${hardTimeoutSec}s: synapse get ${args} ${eid} --downloadLocation ."
+    set +e
+    timeout ${hardTimeoutSec}s synapse --debug get ${args} ${eid} --downloadLocation . 2>&1 | tee synapse_debug.log
+    rc=\$?
+    set -e
 
-    start_ts=\$(date +%s)
-    last_bytes=-1
-    stagnant_cnt=0
+    if [ "\$rc" -eq 124 ]; then
+      echo "ERROR: synapse get timed out after ${hardTimeoutSec}s for ${eid}" >&2
+      exit 2
+    elif [ "\$rc" -ne 0 ]; then
+      echo "ERROR: synapse get failed (rc=\$rc) for ${eid}" >&2
+      exit 3
+    fi
 
     # Normalize filenames (spaces -> underscores)
     shopt -s nullglob
     for f in *\\ *; do mv "\${f}" "\${f// /_}"; done
 
-    echo "Final listing:"
-    ls -lAh || true
+    # Collect real files into ./out (exclude logs and Nextflow internals)
+    shopt -s dotglob
+    for f in *; do
+      [[ "\$f" == "." || "\$f" == ".." ]] && continue
+      [[ "\$f" == "out" || "\$f" == ".command"* || "\$f" == "synapse_debug.log" ]] && continue
+      if [ -f "\$f" ]; then
+        mv "\$f" out/
+      fi
+    done
 
-    # Require that at least one real file (exclude logs/nextflow)
-    found=\$(find . -maxdepth 1 -type f ! -name "synapse_debug.log" ! -name ".command*" -printf '.' | wc -c)
+    echo "Final listing in ./out:"
+    ls -lAh out || true
+
+    # Require at least one real file
+    found=\$(find out -maxdepth 1 -type f -printf '.' | wc -c)
     if [ "\$found" -eq 0 ]; then
       echo "ERROR: No files were downloaded for ${eid}" >&2
-      exit 3
+      exit 4
     fi
 
     echo "__SYNAPSE_GET_DONE__ \$(date -Is)"
     """
-    
+
     stub:
     """
-    echo "Stub: creating a fake file for testing..."
-    dd if=/dev/urandom of=small_file.tmp bs=1M count=1
+    mkdir -p out
+    dd if=/dev/urandom of=out/small_file.tmp bs=1M count=1 status=none
     """
 }
 
@@ -164,10 +177,11 @@ process synapse_get {
 ================================================================================
  PROCESS: make_metadata_tsv
  - Builds CRDC-style TSV strictly from samplesheet values (no file probing)
- - Picks one data file to pass downstream:
+ - Picks one data file from ./out to pass downstream:
      * Prefer basename matching meta.file_name (after space->underscore)
-     * Else first regular file in work dir (excluding logs/.command*)
- - Emits: tuple val(meta), path("*_Metadata.tsv"), path("DATAFILE_SELECTED")
+     * Else first regular file under ./out
+ - Emits: tuple val(meta), path("DATAFILE_SELECTED"), path("*_Metadata.tsv")
+   (note: order matches next process input)
 ================================================================================
 */
 process make_metadata_tsv {
@@ -175,10 +189,10 @@ process make_metadata_tsv {
     tag "${ eidOf(meta) }"
 
     input:
-    tuple val(meta), path(downloaded_files)
+    tuple val(meta), path(downloaded_dir)
 
     output:
-    tuple val(meta), path("*_Metadata.tsv"), path("DATAFILE_SELECTED")
+    tuple val(meta), path("DATAFILE_SELECTED"), path("*_Metadata.tsv")
 
     script:
     def eid               = eidOf(meta)
@@ -215,14 +229,18 @@ process make_metadata_tsv {
     """
     set -euo pipefail
 
-    # Choose a data file to pass on (exclude debug & nextflow files)
+    # Work under the staged download directory
+    D="${downloaded_dir}"
+    [ -d "\$D" ] || { echo "Missing download dir: \$D" >&2; exit 1; }
+
+    # Choose a data file to pass on (prefer exact match; else first)
     SELECTED=""
-    if [ -n "${desired}" ] && [ -f "${desired}" ]; then
-      SELECTED="${desired}"
+    if [ -n "${desired}" ] && [ -f "\$D/${desired}" ]; then
+      SELECTED="\$D/${desired}"
     else
-      mapfile -t FILES < <(find . -maxdepth 1 -type f ! -name "synapse_debug.log" ! -name ".command*" -printf "%f\\n" | sort)
+      mapfile -t FILES < <(find "\$D" -maxdepth 1 -type f -printf "%f\\n" | sort)
       if [ "\${#FILES[@]}" -gt 0 ]; then
-        SELECTED="\${FILES[0]}"
+        SELECTED="\$D/\${FILES[0]}"
       fi
     fi
 
@@ -231,16 +249,16 @@ process make_metadata_tsv {
       exit 1
     fi
 
+    # Expose selected data file under a stable name for downstream binding
+    ln -sf "\$SELECTED" DATAFILE_SELECTED
+
     # Write TSV strictly from samplesheet values
     cat > ${eid}_Metadata.tsv <<'TSV'
 type	study.phs_accession	participant.study_participant_id	sample.sample_id	file_name	file_type	file_description	file_size	md5sum	experimental_strategy_and_data_subtypes	submission_version	checksum_value	checksum_algorithm	file_mapping_level	release_datetime	is_supplementary_file
 file	${study_phs}	${participant_id}	${sample_id}	${file_name}	${file_type}	${file_description}	${file_size}	${md5sum}	${strategy}	${submission_version}	${checksum_value}	${checksum_algorithm}	${file_mapping_level}	${release_datetime}	${is_supplementary}
 TSV
 
-    # Expose selected data file under a stable name for downstream binding
-    ln -sf "\$SELECTED" DATAFILE_SELECTED
-
-    ls -lh ${eid}_Metadata.tsv
+    ls -lh ${eid}_Metadata.tsv DATAFILE_SELECTED
     """
 }
 
@@ -332,7 +350,9 @@ process crdc_upload {
 
     if ! command -v ${uploader} >/dev/null 2>&1; then
       echo "CRDC uploader not found; installing..."
-      python -m pip install --no-cache-dir "git+https://github.com/CBIIT/crdc-datahub-cli-uploader.git" >/dev/null
+      python -m pip install --no-cache-dir "git+https://github.com/CBIIT/crdc-datahub-cli-uploader.git" >/devnull 2>&1 || \
+      python -m pip install --no-cache-dir crdc-datahub-cli-uploader >/dev/null 2>&1 || true
+
       for c in crdc-uploader crdc_datahub_uploader; do
         if command -v "\$c" >/dev/null 2>&1; then uploader_cmd="\$c"; break; fi
       done
@@ -365,13 +385,15 @@ process crdc_upload {
 ================================================================================
 */
 workflow {
-  ch_dl   = ch_input          | synapse_get
-  ch_meta = ch_dl             | make_metadata_tsv
-  ch_cfg  = ch_meta           | make_uploader_config
-  ch_up   = ch_cfg            | crdc_upload
+
+  // Prefer function-style process invocation for clarity & correctness
+  ch_dl   = synapse_get( ch_input )               // (meta, out/)
+  ch_meta = make_metadata_tsv( ch_dl )            // (meta, DATAFILE_SELECTED, *_Metadata.tsv)
+  ch_cfg  = make_uploader_config( ch_meta )       // (meta, DATAFILE_SELECTED, cli-config-*.yml)
+  ch_up   = crdc_upload( ch_cfg )                 // (meta, upload.log)
 
   // Visibility
-  ch_meta.view { meta, tsv, datafile -> "METADATA:\t${eidOf(meta)}\t${tsv}" }
-  ch_cfg.view  { meta, yml -> "CONFIG:\t${eidOf(meta)}\t${yml}" }
+  ch_meta.view { meta, datafile, tsv -> "METADATA:\t${eidOf(meta)}\t${tsv}\t->\t${datafile}" }
+  ch_cfg.view  { meta, datafile, yml -> "CONFIG:\t${eidOf(meta)}\t${yml}" }
   ch_up.view   { meta, log -> "UPLOAD:\t${eidOf(meta)}\t${log}" }
 }
