@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "HTAN Samplesheet Schema",
   "description": "Schema for validating HTAN/CRDC-style samplesheet.tsv input",
   "type": "array",
@@ -8,7 +8,10 @@
     "properties": {
       "type": { "type": "string", "enum": ["file"] },
 
-      "study.phs_accession": { "type": "string", "pattern": "^phs\\d{6,}$" },
+      "study.phs_accession": { 
+        "type": "string", 
+        "pattern": "^phs\\d{6,}$" 
+      },
 
       "participant.study_participant_id": { "type": ["string", "null"] },
 
@@ -23,9 +26,12 @@
 
       "file_description": { "type": ["string", "null"] },
 
-      "file_size": { "type": ["integer", "number", "null"] },
+      "file_size": { "type": ["integer", "number", "string", "null"] },
 
-      "md5sum": { "type": "string", "pattern": "^[a-fA-F0-9]{32}$" },
+      "md5sum": { 
+        "type": "string", 
+        "pattern": "^[a-fA-F0-9]{32}$" 
+      },
 
       "experimental_strategy_and_data_subtypes": { "type": ["string", "null"] },
 
@@ -44,7 +50,10 @@
 
       "is_supplementary_file": { "type": ["boolean", "string", "null"] },
 
-      "entityid": { "type": "string", "pattern": "^syn\\d+$" }
+      "entityid": { 
+        "type": "string", 
+        "pattern": "^syn\\d+$" 
+      }
     },
     "required": [
       "type",
@@ -58,3 +67,4 @@
     "additionalProperties": true
   }
 }
+
