@@ -160,17 +160,14 @@ process synapse_get {
 */
 
 process make_metadata_tsv {
-  // Fix the Batch error: give the process a container
-  container 'bash:5.2'
+  container 'ubuntu:22.04'
 
-  // Accept the list of files produced by: path('out/*')
   input:
-  tuple val(meta), path(downloaded_files)
+  tuple val(meta), path(downloaded_files)   // works with synapse_get: path('out/*')
 
   output:
   tuple val(meta), path('*.tsv')
 
-  // Derive the download directory from the first file
   script:
   def desired      = (meta instanceof Map ? (meta.Filename ?: meta.name ?: meta.file_name ?: '') : meta.toString())
   def desired_base = desired.tokenize('/').last()
@@ -190,25 +187,19 @@ process make_metadata_tsv {
   desired_base="${desired_base}"
 
   SELECTED=""
-
-  # Prefer exact basename match
   mapfile -t MATCHES < <(find "\$D" -type f -printf "%f\t%p\n" \
       | awk -F'\t' -v d="\$desired_base" '\$1==d {print \$2}' | sort)
-
   if (( \${#MATCHES[@]} )); then
     SELECTED="\${MATCHES[0]}"
   else
-    # Fallback: pick largest file
     SELECTED="\$(find "\$D" -type f -printf "%s\t%p\n" | sort -rn | head -n1 | cut -f2-)"
   fi
-
   [ -n "\$SELECTED" ] || { echo "No file found under \$D" >&2; exit 1; }
 
   printf "entityId\tfilename\n" > metadata.tsv
   printf "%s\t%s\n" "${desired_base:-unknown}" "\$SELECTED" >> metadata.tsv
   """
 }
-
 
 /*
 ================================================================================
