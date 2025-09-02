@@ -98,7 +98,7 @@ process make_config_yml {
       dryrun: false
       overwrite: false
       retries: 3
-      submission: ${params.submission_uuid}
+      submission: ${params.submission_uuid ?: System.getenv('CRDC_SUBMISSION_ID')}
       manifest: ${manifest}
       token: \${CRDC_API_TOKEN}
       type: data file
