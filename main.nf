@@ -183,7 +183,7 @@ workflow {
         .collect()
         .set { all_meta }
 
-    global_tsv = write_clean_tsv(all_meta).out
+    global_tsv = write_clean_tsv(all_meta)
 
     // Step 3: add YAML configs referencing the global TSV
     with_yaml = cleaned
