@@ -118,7 +118,7 @@ process synapse_get {
     synapse --version || true
 
     # Download
-     synapse -p \$SYNAPSE_AUTH_TOKEN_DYP get ${args} ${eid}
+    synapse -p \$SYNAPSE_AUTH_TOKEN_DYP get ${args} ${eid}
 
     # Normalize: replace spaces in top-level files
     shopt -s nullglob
