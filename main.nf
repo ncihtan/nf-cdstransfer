@@ -47,3 +47,6 @@ process synapse_get {
     """
 }
 
+workflow {
+    synapse_get(ch_input)
+}
