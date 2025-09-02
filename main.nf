@@ -66,9 +66,10 @@ process synapse_get {
     script:
     def args = task.ext.args ?: ''
     """
-    echo "Fetching entity \${meta.entityid} from Synapse into flat directory..."
-    synapse -p \$SYNAPSE_AUTH_TOKEN_DYP get $args \${meta.entityid}
+    echo "Fetching entity ${meta.entityid} from Synapse into flat directory..."
+    synapse -p $SYNAPSE_AUTH_TOKEN_DYP get $args ${meta.entityid}
     """
+
 }
 
 process subset_row_without_entityid {
