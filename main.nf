@@ -83,10 +83,11 @@ def guessFromList = { List row ->
  - Emits: tuple val(meta), path("out")  (directory)
 ================================================================================
 */
+
 process synapse_get {
 
     container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
-    tag "${ eidOf(meta) }"
+    tag "${ eidOf(meta) ?: 'no-id' }"
 
     input:
     val(meta)
@@ -94,11 +95,12 @@ process synapse_get {
     secret 'SYNAPSE_AUTH_TOKEN'
 
     output:
-    tuple val(meta), path("*")
+    tuple val(meta), path('out/*')
 
     script:
     def args = task.ext.args ?: ''
     def eid  = eidOf(meta)
+    if (!eid) throw new IllegalArgumentException("synapse_get: could not resolve entity id from meta=${meta}")
 
     """
     #!/usr/bin/env bash
@@ -106,21 +108,31 @@ process synapse_get {
 
     export PYTHONUNBUFFERED=1
     export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
-    export HOME="\$PWD"                 # make synapse config/cache local
+    export HOME="\$PWD"                 # keep synapse config/cache local
     export SYNAPSE_CACHE_DIR="\$PWD/.synapseCache"
     mkdir -p "\$SYNAPSE_CACHE_DIR" out
 
     echo "== synapse_get =="
     echo "Entity ID: ${eid}"
 
-    echo "Fetching entity ${meta.entityid} from Synapse..."
-    synapse -p \$SYNAPSE_AUTH_TOKEN get $args ${eid}
+    synapse --version || true
 
-    # Normalize filenames (spaces -> underscores)
+    if [ -z "\${SYNAPSE_AUTH_TOKEN:-}" ]; then
+      echo "ERROR: SYNAPSE_AUTH_TOKEN is not set" >&2
+      exit 1
+    fi
+
+    # Non-interactive auth via token; '-p' reads from env var
+    synapse login -p "\$SYNAPSE_AUTH_TOKEN"
+
+    # Download
+    synapse get ${args} ${eid}
+
+    # Normalize: replace spaces in top-level files
     shopt -s nullglob
     for f in *\\ *; do mv "\${f}" "\${f// /_}"; done
 
-    # Collect real files into ./out (exclude logs and Nextflow internals)
+    # Move only real payloads to ./out (skip NF internals & logs)
     shopt -s dotglob
     for f in *; do
       [[ "\$f" == "." || "\$f" == ".." ]] && continue
