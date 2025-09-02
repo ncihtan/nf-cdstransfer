@@ -65,9 +65,10 @@ process synapse_get {
 
     script:
     def args = task.ext.args ?: ''
+    def token = System.getenv('SYNAPSE_AUTH_TOKEN_DYP')
     """
     echo "Fetching entity ${meta.entityid} from Synapse into flat directory..."
-    synapse -p $SYNAPSE_AUTH_TOKEN_DYP get $args ${meta.entityid}
+    synapse -p \$SYNAPSE_AUTH_TOKEN_DYP get $args ${meta.entityid}
     """
 
 }
