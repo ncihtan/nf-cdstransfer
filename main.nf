@@ -15,12 +15,10 @@ def _isUrl = (_raw ==~ /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//)
 def _abs   = file(_raw).isAbsolute()
 def repoPath = file("${projectDir}/${_raw}")
 
-// Priority: URL (GitHub raw, HTTPS, etc.) → absolute path → repo copy
 def resolved_input = _isUrl ? _raw
                     : (_abs && file(_raw).exists()) ? file(_raw).toString()
                     : (repoPath.exists() ? repoPath.toString() : repoPath.toString())
 
-// Validate pipeline params
 validateParameters()
 
 // headers must match your TSV
@@ -65,17 +63,15 @@ process synapse_get {
 
     script:
     def args = task.ext.args ?: ''
-    def token = System.getenv('SYNAPSE_AUTH_TOKEN_DYP')
     """
     echo "Fetching entity ${meta.entityid} from Synapse into flat directory..."
     synapse -p \$SYNAPSE_AUTH_TOKEN_DYP get $args ${meta.entityid}
     """
-
 }
 
 process subset_row_without_entityid {
 
-    container 'python:3.11-slim' 
+    container 'python:3.11-slim'
 
     tag "${meta.sample_id ?: meta.file_name}"
 
@@ -86,14 +82,14 @@ process subset_row_without_entityid {
     tuple val(clean_meta), path(files)
 
     script:
+    // Pass the cleaned metadata forward explicitly
     def clean_meta = meta.findAll { k, v -> k != 'entityid' }
-    """
-    echo "Subset row for ${meta.file_name}, dropped entityid"
-    """
+    return [ clean_meta, files ]
 }
 
-
 process make_config_yml {
+
+    container 'python:3.11-slim'
 
     tag "${meta.file_name}"
 
@@ -105,7 +101,6 @@ process make_config_yml {
 
     script:
     def dryrun_value = params.dry_run ? "true" : "false"
-
     """
     cat > cli-config-${meta.file_name}_file.yml <<'YML'
     Config:
@@ -123,6 +118,7 @@ process make_config_yml {
 
 process write_clean_tsv {
 
+    container 'python:3.11-slim'
     publishDir "results", mode: 'copy'
 
     input:
@@ -144,9 +140,9 @@ process write_clean_tsv {
 
 process crdc_upload {
 
-    tag "${meta.file_name}"
-
     container 'python:3.11-slim'
+
+    tag "${meta.file_name}"
 
     input:
     tuple val(meta), path(files), path(config), path(global_tsv)
@@ -158,7 +154,6 @@ process crdc_upload {
 
     script:
     def dryrun_flag = params.dry_run ? "--dry-run" : ""
-
     """
     set -euo pipefail
 
@@ -170,6 +165,7 @@ process crdc_upload {
     """
 }
 
+
 /*
 ================================================================================
     WORKFLOW
@@ -178,24 +174,20 @@ process crdc_upload {
 
 workflow {
 
-    // Step 1: download and clean rows
     cleaned = ch_input \
         | synapse_get \
         | subset_row_without_entityid
 
-    // Step 2: collect all cleaned meta into one TSV
     cleaned.map { meta, files -> meta }
         .collect()
         .set { all_meta }
 
     global_tsv = write_clean_tsv(all_meta)
 
-    // Step 3: add YAML configs referencing the global TSV
     with_yaml = cleaned
         .combine(global_tsv)
         | make_config_yml
 
-    // Step 4: upload each file using its YAML + global TSV
     crdc_upload(with_yaml)
 }
 
