@@ -133,6 +133,7 @@ process crdc_upload {
     tuple val(meta), path(files), path(config), path(global_tsv)
 
     secret 'CRDC_API_TOKEN'
+    secret 'GIT_TOKEN_DYP'
 
     output:
     tuple val(meta), path(files), path(config), path(global_tsv)
@@ -144,7 +145,9 @@ process crdc_upload {
 
     echo "Fetching CRDC uploader source from GitHub..."
     git clone https://github.com/CBIIT/crdc-datahub-cli-uploader.git
-    git clone https://github.com/CBIIT/bento.git
+
+    echo "Cloning bento with GitHub token..."
+    git clone https://\$GIT_TOKEN_DYP@github.com/CBIIT/bento.git
 
     echo "Installing dependencies..."
     pip install --quiet -r bento/requirements.txt
@@ -155,6 +158,7 @@ process crdc_upload {
     python3 src/uploader.py --config ../${config} $dryrun_flag
     """
 }
+
 
 
 
