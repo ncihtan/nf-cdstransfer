@@ -9,6 +9,7 @@ nextflow.enable.dsl = 2
 
 include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
+// ---- Resolve samplesheet path (local or GitHub/raw URL) ----
 def _raw = params.input ?: 'samplesheet.tsv'
 def _isUrl = (_raw ==~ /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//)
 def _abs   = file(_raw).isAbsolute()
@@ -20,6 +21,7 @@ def resolved_input = _isUrl ? _raw
 
 validateParameters()
 
+// headers must match your TSV
 def headers = [
   "type", "study.phs_accession", "participant.study_participant_id",
   "sample.sample_id", "file_name", "file_type", "file_description",
@@ -62,7 +64,7 @@ process synapse_get {
     script:
     def args = task.ext.args ?: ''
     """
-    echo "Fetching entity ${meta.entityid} from Synapse..."
+    echo "Fetching entity ${meta.entityid} from Synapse into flat directory..."
     synapse -p \$SYNAPSE_AUTH_TOKEN_DYP get $args ${meta.entityid}
     """
 }
@@ -83,19 +85,21 @@ process make_config_yml {
     tuple val(meta), path(files), path("cli-config-*_file.yml"), path(global_tsv)
 
     script:
-    def dryrun_value = params.dry_run ? "true" : "false"
+    def dryrun_value  = params.dry_run ? "true" : "false"
+    def submission_id = System.getenv('CRDC_SUBMISSION_ID')
+    def token         = System.getenv('CRDC_API_TOKEN')
 
     """
-    cat > cli-config-${meta.file_name}_file.yml <<'YML'
+    cat > cli-config-${meta.file_name}_file.yml <<YML
     Config:
       api-url: https://hub.datacommons.cancer.gov/api/graphql
       dryrun: ${dryrun_value}
       overwrite: ${params.overwrite}
       retries: 3
-      submission: \${CRDC_SUBMISSION_ID}
+      submission: ${submission_id}
       manifest: samplesheet_no_entityid.tsv
       data: .
-      token: \${CRDC_API_TOKEN}
+      token: ${token}
       type: data file
     YML
     """
@@ -174,9 +178,9 @@ process crdc_upload {
     echo "============================================"
     echo "Dumping CRDC uploader log:"
     if ls tmp/Uploader*.log 1> /dev/null 2>&1; then
-      cat tmp/Uploader*.log > ../upload-log-${meta.file_name}.txt
+      cat tmp/Uploader*.log
     else
-      echo "No uploader log found" > ../upload-log-${meta.file_name}.txt
+      echo "No uploader log found"
     fi
     echo "============================================"
 
@@ -195,10 +199,10 @@ process crdc_upload {
 
 workflow {
 
-    // Step 1: download files from Synapse (renamed to file_name)
+    // Step 1: download files from Synapse
     fetched = ch_input | synapse_get
 
-    // Step 2: drop entityid
+    // Step 2: inline map to drop entityid
     cleaned = fetched.map { meta, files ->
         def clean_meta = meta.findAll { k, v -> k != 'entityid' }
         tuple(clean_meta, files)
