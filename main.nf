@@ -143,14 +143,17 @@ process crdc_upload {
     set -euo pipefail
 
     echo "Fetching CRDC uploader source from GitHub..."
-    git clone --depth 1 https://github.com/CBIIT/crdc-datahub-cli-uploader.git
+    git clone --recurse-submodules --depth 1 https://github.com/CBIIT/crdc-datahub-cli-uploader.git
     cd crdc-datahub-cli-uploader
 
     echo "Installing uploader requirements..."
     pip install --quiet -r requirements.txt
 
     echo "Running CRDC uploader..."
-    python3 src/uploader.py --config ../${config} --manifest ../${global_tsv} $dryrun_flag
+    python3 src/uploader.py \\
+      --config ../${config} \\
+      --manifest ../${global_tsv} \\
+      $dryrun_flag
     """
 }
 
