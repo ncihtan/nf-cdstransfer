@@ -71,7 +71,7 @@ process synapse_get {
 
 process make_config_yml {
 
-    container 'python:3.11-slim'
+    container 'python:3.11'
 
     tag "${meta.file_name}"
 
@@ -100,7 +100,7 @@ process make_config_yml {
 
 process write_clean_tsv {
 
-    container 'python:3.11-slim'
+    container 'python:3.11'
     publishDir "results", mode: 'copy'
 
     input:
@@ -110,7 +110,7 @@ process write_clean_tsv {
     path("samplesheet_no_entityid.tsv")
 
     script:
-    // Convert Groovy objects into JSON string safely
+    // serialize to JSON for safe Python parsing
     def json = groovy.json.JsonOutput.toJson(all_meta)
     """
     python3 - <<'PYCODE'
@@ -122,10 +122,9 @@ process write_clean_tsv {
     """
 }
 
-
 process crdc_upload {
 
-    container 'python:3.11-slim'
+    container 'python:3.11'
 
     tag "${meta.file_name}"
 
@@ -162,24 +161,24 @@ workflow {
     // Step 1: download files from Synapse
     fetched = ch_input | synapse_get
 
-    // Step 2: inline map to drop entityid from each meta row
+    // Step 2: inline map to drop entityid
     cleaned = fetched.map { meta, files ->
         def clean_meta = meta.findAll { k, v -> k != 'entityid' }
         tuple(clean_meta, files)
     }
 
-    // Step 3: collect cleaned rows into one TSV
+    // Step 3: collect all cleaned meta into one TSV
     cleaned.map { meta, files -> meta }
         .collect()
         .set { all_meta }
 
     global_tsv = write_clean_tsv(all_meta)
 
-    // Step 4: add YAML configs referencing the global TSV
+    // Step 4: make YAML configs referencing the global TSV
     with_yaml = cleaned
         .combine(global_tsv)
         | make_config_yml
 
-    // Step 5: upload each file using its YAML + global TSV
+    // Step 5: upload each file
     crdc_upload(with_yaml)
 }
