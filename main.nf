@@ -145,11 +145,8 @@ process crdc_upload {
     """
     set -euo pipefail
 
-    echo "Staging file for upload..."
-    cp -v ${files} .
-
     echo "============================================"
-    echo "Listing files in working directory:"
+    echo "Listing files in working directory before upload:"
     ls -lh .
     echo "============================================"
 
@@ -174,8 +171,8 @@ process crdc_upload {
       --manifest ../${global_tsv} \\
       $dryrun_flag
 
-    echo "Cleaning up staged file..."
-    rm -f ../${files}
+    echo "Cleaning up downloaded file(s)..."
+    rm -f ${files}
     """
 }
 
