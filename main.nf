@@ -110,9 +110,9 @@ process write_clean_tsv {
     path("samplesheet_no_entityid.tsv")
 
     script:
-    // serialize to JSON for safe Python parsing
     def json = groovy.json.JsonOutput.toJson(all_meta)
     """
+    pip install --quiet pandas
     python3 - <<'PYCODE'
     import pandas as pd, json
     rows = json.loads('''${json}''')
@@ -121,6 +121,7 @@ process write_clean_tsv {
     PYCODE
     """
 }
+
 
 process crdc_upload {
 
