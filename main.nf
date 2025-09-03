@@ -156,6 +156,16 @@ process crdc_upload {
     echo "Installing uploader requirements..."
     pip install --quiet -r requirements.txt
 
+    echo "============================================"
+    echo "Printing YAML config:"
+    echo "--------------------------------------------"
+    cat ../${config}
+    echo "============================================"
+    echo "Printing Manifest TSV (head + 20 lines):"
+    echo "--------------------------------------------"
+    head -n 20 ../${global_tsv}
+    echo "============================================"
+
     echo "Running CRDC uploader..."
     python3 src/uploader.py \\
       --config ../${config} \\
@@ -163,6 +173,7 @@ process crdc_upload {
       $dryrun_flag
     """
 }
+
 
 
 
