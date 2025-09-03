@@ -48,7 +48,6 @@ ch_input = Channel.fromList(
 */
 
 process synapse_get {
-
     container 'ghcr.io/sage-bionetworks/synapsepythonclient:develop-b784b854a069e926f1f752ac9e4f6594f66d01b7'
 
     tag "${meta.entityid}"
@@ -69,44 +68,9 @@ process synapse_get {
     """
 }
 
-process make_config_yml {
-    container 'python:3.11'
-
-    tag "${meta.file_name}"
-
-    input:
-    tuple val(meta), path(files), path(global_tsv)
-
-    secret 'CRDC_SUBMISSION_ID'
-    secret 'CRDC_API_TOKEN'
-
-    output:
-    tuple val(meta), path(files), path("cli-config-*_file.yml"), path(global_tsv)
-
-    script:
-    def dryrun_value = params.dry_run ? "true" : "false"
-
-    """
-    cat > cli-config-${meta.file_name}_file.yml <<YML
-    Config:
-      api-url: https://hub.datacommons.cancer.gov/api/graphql
-      dryrun: ${dryrun_value}
-      overwrite: ${params.overwrite}
-      retries: 3
-      submission: \$CRDC_SUBMISSION_ID
-      manifest: ${meta.manifest_tsv}
-      data: ..
-      token: \$CRDC_API_TOKEN
-      type: data file
-    YML
-    """
-}
-
 
 process write_file_tsv {
-
     container 'python:3.11'
-
     tag "${meta.file_name}"
 
     input:
@@ -128,19 +92,51 @@ process write_file_tsv {
     """
 }
 
-process crdc_upload {
-    container 'python:3.11'
 
+process make_config_yml {
+    container 'python:3.11'
     tag "${meta.file_name}"
 
     input:
-    tuple val(meta), path(files), path(config), path(global_tsv)
+    tuple val(meta), path(files), path(manifest_tsv)
+
+    secret 'CRDC_SUBMISSION_ID'
+    secret 'CRDC_API_TOKEN'
+
+    output:
+    tuple val(meta), path(files), path("cli-config-*_file.yml"), path(manifest_tsv)
+
+    script:
+    def dryrun_value = params.dry_run ? "true" : "false"
+    """
+    cat > cli-config-${meta.file_name}_file.yml <<YML
+    Config:
+      api-url: https://hub.datacommons.cancer.gov/api/graphql
+      dryrun: ${dryrun_value}
+      overwrite: ${params.overwrite}
+      retries: 3
+      submission: \$CRDC_SUBMISSION_ID
+      manifest: ../${manifest_tsv}
+      data: ..
+      token: \$CRDC_API_TOKEN
+      type: data file
+    YML
+    """
+}
+
+
+process crdc_upload {
+    container 'python:3.11'
+    tag "${meta.file_name}"
+
+    input:
+    tuple val(meta), path(files), path(config), path(manifest_tsv)
 
     secret 'CRDC_API_TOKEN'
     secret 'CRDC_SUBMISSION_ID'
 
     output:
-    tuple val(meta), path(config), path(global_tsv)
+    tuple val(meta), path(config), path(manifest_tsv)
 
     script:
     def dryrun_flag = params.dry_run ? "--dry-run" : ""
@@ -163,7 +159,7 @@ process crdc_upload {
     echo "Running CRDC uploader..."
     python3 src/uploader.py \\
       --config ../${config} \\
-      --manifest ../${global_tsv} \\
+      --manifest ../${manifest_tsv} \\
       $dryrun_flag || true
 
     echo "============================================"
