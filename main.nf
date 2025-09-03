@@ -144,15 +144,18 @@ process crdc_upload {
 
     echo "Fetching CRDC uploader source from GitHub..."
     git clone https://github.com/CBIIT/crdc-datahub-cli-uploader.git
-    cd crdc-datahub-cli-uploader
+    git clone https://github.com/CBIIT/bento.git
 
     echo "Installing dependencies..."
-    pip install --quiet -r requirements.txt
+    pip install --quiet -r bento/requirements.txt
+    pip install ./bento
 
-    echo "Uploading ${meta.file_name} to CRDC..."
+    echo "Running CRDC uploader..."
+    cd crdc-datahub-cli-uploader
     python3 src/uploader.py --config ../${config} $dryrun_flag
     """
 }
+
 
 
 
