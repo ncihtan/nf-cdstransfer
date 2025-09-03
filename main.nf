@@ -64,8 +64,6 @@ process synapse_get {
     """
     echo "Fetching entity ${meta.entityid} from Synapse..."
     synapse -p \$SYNAPSE_AUTH_TOKEN_DYP get $args ${meta.entityid}
-    echo "Renaming downloaded file to match manifest: ${meta.file_name}"
-    mv * "${meta.file_name}"
     """
 }
 
