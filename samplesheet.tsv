@@ -1,3 +1,4 @@
 type	 study.phs_accession	 participant.study_participant_id	 sample.sample_id	file_name	file_type	file_description	file_size	md5sum	experimental_strategy_and_data_subtypes	submission_version	checksum_value	checksum_algorithm	file_mapping_level	release_datetime	is_supplementary_file	entityid
 
-file	phs002371		HTA10_02_213	A001C004.sorted.ir.br.rmDup.md.rn.bam.bai	BAM		4319520	b8f6a161337a6697cffb6cb256203b90	DNA-Seq						FALSE	syn51378172
+file	phs002371		HTA10_02_213	A001C107.sorted.ir.br.rmDup.md.rn.bam	BAM		6882560292	330cdcddcc6b4a4cc4d0397d700a09d3	DNA-Seq						FALSE	syn51728859
+
