@@ -68,7 +68,6 @@ process synapse_get {
     """
 }
 
-
 process write_file_tsv {
     container 'python:3.11'
     tag "${meta.file_name}"
@@ -81,13 +80,14 @@ process write_file_tsv {
 
     script:
     def json = groovy.json.JsonOutput.toJson(meta)
+    def safe_name = meta.file_name.replaceAll(/[^a-zA-Z0-9._-]/, "_")  // sanitize filename for TSV
     """
     pip install --quiet pandas
     python3 - <<'PYCODE'
     import pandas as pd, json
     row = json.loads('''${json}''')
     df = pd.DataFrame([row])
-    df.to_csv("samplesheet_no_entityid-${row['file_name']}.tsv", sep="\\t", index=False)
+    df.to_csv("samplesheet_no_entityid-${safe_name}.tsv", sep="\\t", index=False)
     PYCODE
     """
 }
