@@ -138,7 +138,7 @@ process crdc_upload {
     secret 'CRDC_SUBMISSION_ID'
 
     output:
-    tuple val(meta), path(config), path(global_tsv)
+    tuple val(meta), path(config), path(global_tsv), path("upload-log-${meta.file_name}.txt")
 
     script:
     def dryrun_flag = params.dry_run ? "--dry-run" : ""
@@ -169,7 +169,16 @@ process crdc_upload {
     python3 src/uploader.py \\
       --config ../${config} \\
       --manifest ../${global_tsv} \\
-      $dryrun_flag
+      $dryrun_flag || true
+
+    echo "============================================"
+    echo "Dumping CRDC uploader log:"
+    if ls tmp/Uploader*.log 1> /dev/null 2>&1; then
+      cat tmp/Uploader*.log > ../upload-log-${meta.file_name}.txt
+    else
+      echo "No uploader log found" > ../upload-log-${meta.file_name}.txt
+    fi
+    echo "============================================"
 
     echo "Cleaning up downloaded file(s)..."
     rm -f ${files}
