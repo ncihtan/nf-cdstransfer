@@ -96,11 +96,13 @@ process make_config_yml {
       retries: 3
       submission: \${CRDC_SUBMISSION_ID}
       manifest: samplesheet_no_entityid.tsv
+      data: .
       token: \${CRDC_API_TOKEN}
       type: data file
     YML
     """
 }
+
 
 
 process write_clean_tsv {
