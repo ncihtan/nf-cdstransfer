@@ -70,7 +70,6 @@ process synapse_get {
 }
 
 process make_config_yml {
-
     container 'python:3.11'
 
     tag "${meta.file_name}"
@@ -85,9 +84,7 @@ process make_config_yml {
     tuple val(meta), path(files), path("cli-config-*_file.yml"), path(global_tsv)
 
     script:
-    def dryrun_value  = params.dry_run ? "true" : "false"
-    def submission_id = System.getenv('CRDC_SUBMISSION_ID')
-    def token         = System.getenv('CRDC_API_TOKEN')
+    def dryrun_value = params.dry_run ? "true" : "false"
 
     """
     cat > cli-config-${meta.file_name}_file.yml <<YML
@@ -96,14 +93,15 @@ process make_config_yml {
       dryrun: ${dryrun_value}
       overwrite: ${params.overwrite}
       retries: 3
-      submission: ${submission_id}
+      submission: \$CRDC_SUBMISSION_ID
       manifest: samplesheet_no_entityid.tsv
       data: .
-      token: ${token}
+      token: \$CRDC_API_TOKEN
       type: data file
     YML
     """
 }
+
 
 process write_clean_tsv {
 
