@@ -69,24 +69,6 @@ process synapse_get {
     """
 }
 
-process subset_row_without_entityid {
-
-    container 'python:3.11-slim'
-
-    tag "${meta.sample_id ?: meta.file_name}"
-
-    input:
-    tuple val(meta), path(files)
-
-    output:
-    tuple val(clean_meta), path(files)
-
-    script:
-    // Pass the cleaned metadata forward explicitly
-    def clean_meta = meta.findAll { k, v -> k != 'entityid' }
-    return [ clean_meta, files ]
-}
-
 process make_config_yml {
 
     container 'python:3.11-slim'
@@ -174,20 +156,27 @@ process crdc_upload {
 
 workflow {
 
-    cleaned = ch_input \
-        | synapse_get \
-        | subset_row_without_entityid
+    // Step 1: download files from Synapse
+    fetched = ch_input | synapse_get
 
+    // Step 2: inline map to drop entityid from each meta row
+    cleaned = fetched.map { meta, files ->
+        def clean_meta = meta.findAll { k, v -> k != 'entityid' }
+        tuple(clean_meta, files)
+    }
+
+    // Step 3: collect cleaned rows into one TSV
     cleaned.map { meta, files -> meta }
         .collect()
         .set { all_meta }
 
     global_tsv = write_clean_tsv(all_meta)
 
+    // Step 4: add YAML configs referencing the global TSV
     with_yaml = cleaned
         .combine(global_tsv)
         | make_config_yml
 
+    // Step 5: upload each file using its YAML + global TSV
     crdc_upload(with_yaml)
 }
-
