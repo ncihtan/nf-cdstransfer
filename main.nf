@@ -95,7 +95,7 @@ process make_config_yml {
       retries: 3
       submission: \$CRDC_SUBMISSION_ID
       manifest: samplesheet_no_entityid.tsv
-      data: .
+      data: ..
       token: \$CRDC_API_TOKEN
       type: data file
     YML
@@ -128,7 +128,6 @@ process write_clean_tsv {
 }
 
 process crdc_upload {
-
     container 'python:3.11'
 
     tag "${meta.file_name}"
@@ -140,7 +139,7 @@ process crdc_upload {
     secret 'CRDC_SUBMISSION_ID'
 
     output:
-    tuple val(meta), path(config), path(global_tsv), path("upload-log-${meta.file_name}.txt")
+    tuple val(meta), path(config), path(global_tsv)
 
     script:
     def dryrun_flag = params.dry_run ? "--dry-run" : ""
@@ -150,6 +149,7 @@ process crdc_upload {
     echo "============================================"
     echo "Listing files in working directory before upload:"
     ls -lh .
+    ls -lh ..
     echo "============================================"
 
     echo "Fetching CRDC uploader source from GitHub..."
@@ -158,14 +158,6 @@ process crdc_upload {
 
     echo "Installing uploader requirements..."
     pip install --quiet -r requirements.txt
-
-    echo "============================================"
-    echo "Printing YAML config:"
-    cat ../${config}
-    echo "============================================"
-    echo "Printing Manifest TSV (head + 20 lines):"
-    head -n 20 ../${global_tsv}
-    echo "============================================"
 
     echo "Running CRDC uploader..."
     python3 src/uploader.py \\
