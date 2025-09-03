@@ -75,6 +75,8 @@ process synapse_get {
 
 process subset_row_without_entityid {
 
+    container 'python:3.11-slim' 
+
     tag "${meta.sample_id ?: meta.file_name}"
 
     input:
@@ -86,9 +88,10 @@ process subset_row_without_entityid {
     script:
     def clean_meta = meta.findAll { k, v -> k != 'entityid' }
     """
-    echo "Subset row for \${meta.file_name}, dropped entityid"
+    echo "Subset row for ${meta.file_name}, dropped entityid"
     """
 }
+
 
 process make_config_yml {
 
