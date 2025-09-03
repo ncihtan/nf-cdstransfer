@@ -157,6 +157,10 @@ process crdc_upload {
     pip install --quiet -r requirements.txt
 
     echo "============================================"
+    echo "Listing files in working directory:"
+    ls -lh .
+    echo "============================================"
+    echo "============================================"
     echo "Printing YAML config:"
     echo "--------------------------------------------"
     cat ../${config}
