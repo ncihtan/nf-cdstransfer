@@ -110,15 +110,18 @@ process write_clean_tsv {
     path("samplesheet_no_entityid.tsv")
 
     script:
+    // Convert Groovy objects into JSON string safely
+    def json = groovy.json.JsonOutput.toJson(all_meta)
     """
     python3 - <<'PYCODE'
-    import pandas as pd
-    rows = ${all_meta}
+    import pandas as pd, json
+    rows = json.loads('''${json}''')
     df = pd.DataFrame(rows)
     df.to_csv("samplesheet_no_entityid.tsv", sep="\\t", index=False)
     PYCODE
     """
 }
+
 
 process crdc_upload {
 
