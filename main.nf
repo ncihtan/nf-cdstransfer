@@ -78,6 +78,9 @@ process make_config_yml {
     input:
     tuple val(meta), path(files), path(global_tsv)
 
+    secret 'CRDC_SUBMISSION_ID'
+    secret 'CRDC_API_TOKEN'
+
     output:
     tuple val(meta), path(files), path("cli-config-*_file.yml"), path(global_tsv)
 
