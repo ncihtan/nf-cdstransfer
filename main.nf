@@ -94,7 +94,7 @@ process make_config_yml {
       overwrite: ${params.overwrite}
       retries: 3
       submission: \$CRDC_SUBMISSION_ID
-      manifest: samplesheet_no_entityid.tsv
+      manifest: ${meta.manifest_tsv}
       data: ..
       token: \$CRDC_API_TOKEN
       type: data file
