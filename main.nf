@@ -180,8 +180,9 @@ process crdc_upload {
     fi
     echo "============================================"
 
-    echo "Cleaning up downloaded file(s)..."
-    rm -f ${files}
+    echo "Listing files in working directory after upload:"
+    ls -lh ..
+    echo "============================================"
     """
 }
 
