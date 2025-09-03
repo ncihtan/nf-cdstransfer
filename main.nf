@@ -86,6 +86,7 @@ process make_config_yml {
 
     script:
     def dryrun_value = params.dry_run ? "true" : "false"
+
     """
     cat > cli-config-${meta.file_name}_file.yml <<'YML'
     Config:
@@ -93,13 +94,14 @@ process make_config_yml {
       dryrun: ${dryrun_value}
       overwrite: ${params.overwrite}
       retries: 3
-      submission: ${params.submission_uuid ?: System.getenv('CRDC_SUBMISSION_ID')}
+      submission: \${CRDC_SUBMISSION_ID}
       manifest: samplesheet_no_entityid.tsv
       token: \${CRDC_API_TOKEN}
       type: data file
     YML
     """
 }
+
 
 process write_clean_tsv {
 
