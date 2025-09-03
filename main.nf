@@ -9,7 +9,6 @@ nextflow.enable.dsl = 2
 
 include { validateParameters; paramsSummaryLog; samplesheetToList } from 'plugin/nf-schema'
 
-// ---- Resolve samplesheet path (local or GitHub/raw URL) ----
 def _raw = params.input ?: 'samplesheet.tsv'
 def _isUrl = (_raw ==~ /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//)
 def _abs   = file(_raw).isAbsolute()
@@ -21,7 +20,6 @@ def resolved_input = _isUrl ? _raw
 
 validateParameters()
 
-// headers must match your TSV
 def headers = [
   "type", "study.phs_accession", "participant.study_participant_id",
   "sample.sample_id", "file_name", "file_type", "file_description",
@@ -64,8 +62,10 @@ process synapse_get {
     script:
     def args = task.ext.args ?: ''
     """
-    echo "Fetching entity ${meta.entityid} from Synapse into flat directory..."
+    echo "Fetching entity ${meta.entityid} from Synapse..."
     synapse -p \$SYNAPSE_AUTH_TOKEN_DYP get $args ${meta.entityid}
+    echo "Renaming downloaded file to match manifest: ${meta.file_name}"
+    mv * "${meta.file_name}"
     """
 }
 
@@ -103,8 +103,6 @@ process make_config_yml {
     """
 }
 
-
-
 process write_clean_tsv {
 
     container 'python:3.11'
@@ -129,7 +127,6 @@ process write_clean_tsv {
     """
 }
 
-
 process crdc_upload {
 
     container 'python:3.11'
@@ -140,14 +137,23 @@ process crdc_upload {
     tuple val(meta), path(files), path(config), path(global_tsv)
 
     secret 'CRDC_API_TOKEN'
+    secret 'CRDC_SUBMISSION_ID'
 
     output:
-    tuple val(meta), path(files), path(config), path(global_tsv)
+    tuple val(meta), path(config), path(global_tsv)
 
     script:
     def dryrun_flag = params.dry_run ? "--dry-run" : ""
     """
     set -euo pipefail
+
+    echo "Staging file for upload..."
+    cp -v ${files} .
+
+    echo "============================================"
+    echo "Listing files in working directory:"
+    ls -lh .
+    echo "============================================"
 
     echo "Fetching CRDC uploader source from GitHub..."
     git clone --recurse-submodules --depth 1 https://github.com/CBIIT/crdc-datahub-cli-uploader.git
@@ -157,16 +163,10 @@ process crdc_upload {
     pip install --quiet -r requirements.txt
 
     echo "============================================"
-    echo "Listing files in working directory:"
-    ls -lh .
-    echo "============================================"
-    echo "============================================"
     echo "Printing YAML config:"
-    echo "--------------------------------------------"
     cat ../${config}
     echo "============================================"
     echo "Printing Manifest TSV (head + 20 lines):"
-    echo "--------------------------------------------"
     head -n 20 ../${global_tsv}
     echo "============================================"
 
@@ -175,10 +175,11 @@ process crdc_upload {
       --config ../${config} \\
       --manifest ../${global_tsv} \\
       $dryrun_flag
+
+    echo "Cleaning up staged file..."
+    rm -f ../${files}
     """
 }
-
-
 
 
 /*
@@ -189,10 +190,10 @@ process crdc_upload {
 
 workflow {
 
-    // Step 1: download files from Synapse
+    // Step 1: download files from Synapse (renamed to file_name)
     fetched = ch_input | synapse_get
 
-    // Step 2: inline map to drop entityid
+    // Step 2: drop entityid
     cleaned = fetched.map { meta, files ->
         def clean_meta = meta.findAll { k, v -> k != 'entityid' }
         tuple(clean_meta, files)
