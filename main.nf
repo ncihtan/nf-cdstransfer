@@ -103,26 +103,27 @@ process make_config_yml {
 }
 
 
-process write_clean_tsv {
+process write_file_tsv {
 
     container 'python:3.11'
-    publishDir "results", mode: 'copy'
+
+    tag "${meta.file_name}"
 
     input:
-    val(all_meta)
+    tuple val(meta), path(files)
 
     output:
-    path("samplesheet_no_entityid.tsv")
+    tuple val(meta), path(files), path("samplesheet_no_entityid-${meta.file_name}.tsv")
 
     script:
-    def json = groovy.json.JsonOutput.toJson(all_meta)
+    def json = groovy.json.JsonOutput.toJson(meta)
     """
     pip install --quiet pandas
     python3 - <<'PYCODE'
     import pandas as pd, json
-    rows = json.loads('''${json}''')
-    df = pd.DataFrame(rows)
-    df.to_csv("samplesheet_no_entityid.tsv", sep="\\t", index=False)
+    row = json.loads('''${json}''')
+    df = pd.DataFrame([row])
+    df.to_csv("samplesheet_no_entityid-${row['file_name']}.tsv", sep="\\t", index=False)
     PYCODE
     """
 }
@@ -188,28 +189,21 @@ process crdc_upload {
 */
 
 workflow {
-
     // Step 1: download files from Synapse
     fetched = ch_input | synapse_get
-
-    // Step 2: inline map to drop entityid
+    
+    // Step 2: drop entityid inline
     cleaned = fetched.map { meta, files ->
         def clean_meta = meta.findAll { k, v -> k != 'entityid' }
         tuple(clean_meta, files)
     }
-
-    // Step 3: collect all cleaned meta into one TSV
-    cleaned.map { meta, files -> meta }
-        .collect()
-        .set { all_meta }
-
-    global_tsv = write_clean_tsv(all_meta)
-
-    // Step 4: make YAML configs referencing the global TSV
-    with_yaml = cleaned
-        .combine(global_tsv)
-        | make_config_yml
-
-    // Step 5: upload each file
+    
+    // Step 3: write a per-file TSV
+    per_file = cleaned | write_file_tsv
+    
+    // Step 4: make YAML config for each file
+    with_yaml = per_file | make_config_yml
+    
+    // Step 5: upload
     crdc_upload(with_yaml)
 }
